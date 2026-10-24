@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "231521017731",
+    "project_id": "funduq-app",
+    "storage_bucket": "funduq-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:231521017731:android:20407b2d7587ae242de0b6",
+        "android_client_info": {
+          "package_name": "com.funduq.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAzxs9u5vYpdcp9RCVIxof0XqzxlNGlazo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
