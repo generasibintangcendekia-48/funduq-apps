@@ -17,20 +17,16 @@ class FirebaseRepository {
             .addOnFailureListener { onResult(false) }
     }
 
-    // 2. Ambil Data User berdasarkan Kode Akses
+    // 2. Ambil Profil User
     fun getUser(accessCode: String, onResult: (UserProfile?) -> Unit) {
         usersRef.document(accessCode).get()
             .addOnSuccessListener { doc ->
-                if (doc.exists()) {
-                    onResult(doc.toObject(UserProfile::class.java))
-                } else {
-                    onResult(null)
-                }
+                onResult(if (doc.exists()) doc.toObject(UserProfile::class.java) else null)
             }
             .addOnFailureListener { onResult(null) }
     }
 
-    // 3. Logika Hasil Belajar: Jika Benar (+25 XP, Hijau), Jika Salah (-5 XP, Kuning ⚠️)
+    // 3. Logika Hasil Belajar: Jika Benar (+25 XP), Jika Salah (-5 XP, Kuning)
     fun updateLessonResult(user: UserProfile, lessonId: String, isCorrect: Boolean, onResult: (UserProfile) -> Unit) {
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
 
@@ -64,13 +60,32 @@ class FirebaseRepository {
         usersRef.document(user.accessCode).set(updatedUser).addOnSuccessListener { onResult(updatedUser) }
     }
 
-    // 4. Ambil Daftar Semua Materi Hadits dari Firestore
-    fun getLessons(onResult: (List<Lesson>) -> Unit) {
-        lessonsRef.orderBy("order").get()
+    // 4. AMBIL HANYA MATERI DARI KITAB YANG SEDANG DIPILIH (100% DINAMIS DARI FIRESTORE)
+    fun getLessonsByBook(bookTitle: String, onResult: (List<Lesson>) -> Unit) {
+        lessonsRef
+            .whereEqualTo("bookTitle", bookTitle)
+            .get()
             .addOnSuccessListener { snap ->
-                val list = snap.toObjects(Lesson::class.java)
+                val list = snap.toObjects(Lesson::class.java).sortedBy { it.order }
                 onResult(list)
             }
             .addOnFailureListener { onResult(emptyList()) }
+    }
+
+    // 5. AMBIL SELURUH DAFTAR KITAB DAN KELAS YANG BENAR-BENAR ADA DI FIRESTORE
+    fun getAvailableCurriculumSummary(onResult: (Map<String, List<String>>) -> Unit) {
+        lessonsRef.get().addOnSuccessListener { snap ->
+            val map = mutableMapOf<String, MutableSet<String>>()
+            for (doc in snap.documents) {
+                val level = doc.getString("levelCategory") ?: "Umum"
+                val book = doc.getString("bookTitle") ?: ""
+                if (book.isNotBlank()) {
+                    map.getOrPut(level) { mutableSetOf() }.add(book)
+                }
+            }
+            onResult(map.mapValues { it.value.toList() })
+        }.addOnFailureListener {
+            onResult(emptyMap())
+        }
     }
 }

@@ -1,5 +1,6 @@
 package com.funduq.app
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -19,11 +20,14 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun LessonQuizScreen(
     lesson: Lesson,
-    onComplete: (isCorrect: Boolean) -> Unit,
+    isExamMode: Boolean = false,
+    initialHearts: Int = 3,
+    onComplete: (isCorrect: Boolean, remainingHearts: Int) -> Unit,
     onBack: () -> Unit
 ) {
-    var selectedOptionIndex by remember { mutableStateOf<Int?>(null) }
-    var isSubmitted by remember { mutableStateOf(false) }
+    var selectedOptionIndex by remember(lesson) { mutableStateOf<Int?>(null) }
+    var isSubmitted by remember(lesson) { mutableStateOf(false) }
+    var hearts by remember { mutableIntStateOf(initialHearts) }
 
     val targetCorrectIndex = lesson.correctIndex
     val isAnswerCorrect = selectedOptionIndex != null && selectedOptionIndex == targetCorrectIndex
@@ -31,29 +35,54 @@ fun LessonQuizScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .background(Color(0xFF131F24)) // Gelap Duolingo
             .statusBarsPadding()
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
+        // Bar Atas: Tombol Keluar & Indikator Hati / XP
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth()
         ) {
             TextButton(onClick = onBack) {
-                Text("⬅ Keluar", color = Color(0xFF1B5E20), fontWeight = FontWeight.Bold)
+                Text("✕ Keluar", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
             }
-            AssistChip(
-                onClick = {},
-                label = { Text("Misi: +${lesson.rewardXp} XP ⭐", fontWeight = FontWeight.Bold, color = Color(0xFFE65100)) }
-            )
+
+            if (isExamMode) {
+                // Tampilan 3 Hati untuk Ujian Loncat
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    repeat(3) { index ->
+                        Text(
+                            text = if (index < hearts) "❤️" else "🖤",
+                            fontSize = 20.sp,
+                            modifier = Modifier.padding(horizontal = 2.dp)
+                        )
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color(0xFF202F36)
+                ) {
+                    Text(
+                        text = "⭐ +${lesson.rewardXp} XP",
+                        color = Color(0xFFFFD54F),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        // Kartu Teks Arab Hadits
         Card(
-            shape = RoundedCornerShape(22.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFFF1F8E9)),
+            shape = RoundedCornerShape(20.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1C2B32)),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(18.dp)) {
@@ -64,43 +93,44 @@ fun LessonQuizScreen(
                     textAlign = TextAlign.Right,
                     modifier = Modifier.fillMaxWidth(),
                     lineHeight = 36.sp,
-                    color = Color(0xFF1B5E20)
+                    color = Color(0xFF81C784)
                 )
-                Spacer(modifier = Modifier.height(12.dp))
-                HorizontalDivider(color = Color(0xFFAED581))
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(color = Color(0xFF2A3C44))
+                Spacer(modifier = Modifier.height(10.dp))
                 Text(
                     text = "Artinya:\n\"${lesson.translation}\"",
                     fontSize = 14.sp,
                     lineHeight = 20.sp,
-                    color = Color(0xFF33691E)
+                    color = Color(0xFFE0E0E0)
                 )
             }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        Text(text = "Pertanyaan:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF757575))
-        Text(text = lesson.question, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color(0xFF212121))
+        Text(text = "Pertanyaan:", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = Color(0xFF9E9E9E))
+        Text(text = lesson.question, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
 
         Spacer(modifier = Modifier.height(14.dp))
 
+        // Pilihan Ganda Interaktif
         lesson.options.forEachIndexed { index, option ->
             val isThisSelected = selectedOptionIndex == index
             val isThisTheCorrectAnswer = index == targetCorrectIndex
 
             val cardBg = when {
-                !isSubmitted && isThisSelected -> Color(0xFFDCEDC8)
-                isSubmitted && isThisTheCorrectAnswer -> Color(0xFFC8E6C9)
-                isSubmitted && isThisSelected && !isThisTheCorrectAnswer -> Color(0xFFFFCDD2)
-                else -> Color.White
+                !isSubmitted && isThisSelected -> Color(0xFF2A424F)
+                isSubmitted && isThisTheCorrectAnswer -> Color(0xFF1B5E20)
+                isSubmitted && isThisSelected && !isThisTheCorrectAnswer -> Color(0xFF7F1D1D)
+                else -> Color(0xFF202F36)
             }
 
             val borderColor = when {
-                !isSubmitted && isThisSelected -> Color(0xFF2E7D32)
-                isSubmitted && isThisTheCorrectAnswer -> Color(0xFF2E7D32)
-                isSubmitted && isThisSelected && !isThisTheCorrectAnswer -> Color(0xFFD32F2F)
-                else -> Color(0xFFE0E0E0)
+                !isSubmitted && isThisSelected -> Color(0xFF58CC02)
+                isSubmitted && isThisTheCorrectAnswer -> Color(0xFF4CAF50)
+                isSubmitted && isThisSelected && !isThisTheCorrectAnswer -> Color(0xFFEF5350)
+                else -> Color(0xFF2C3E47)
             }
 
             Card(
@@ -121,7 +151,7 @@ fun LessonQuizScreen(
                         modifier = Modifier.weight(1f),
                         fontSize = 15.sp,
                         fontWeight = if (isThisSelected) FontWeight.Bold else FontWeight.Normal,
-                        color = Color(0xFF212121)
+                        color = Color.White
                     )
                     if (isSubmitted) {
                         if (isThisTheCorrectAnswer) Text("✅", fontSize = 16.sp)
@@ -131,25 +161,26 @@ fun LessonQuizScreen(
             }
         }
 
+        // Kotak Penjelasan jika Salah
         if (isSubmitted && !isAnswerCorrect) {
             Spacer(modifier = Modifier.height(14.dp))
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFEBEE)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF3E1F24)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Text("❌ Jawaban Anda Sebelumnya Kurang Tepat", fontWeight = FontWeight.Bold, color = Color(0xFFC62828))
+                    Text("❌ Jawaban Kurang Tepat", fontWeight = FontWeight.Bold, color = Color(0xFFFF8A80))
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
                         text = "Jawaban yang benar: \"${lesson.options.getOrNull(targetCorrectIndex)}\"",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color(0xFF2E7D32)
+                        color = Color(0xFF81C784)
                     )
                     if (lesson.explanation.isNotBlank()) {
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text(text = "Penjelasan: ${lesson.explanation}", fontSize = 13.sp, color = Color(0xFF5D4037))
+                        Text(text = "Penjelasan: ${lesson.explanation}", fontSize = 13.sp, color = Color(0xFFE0E0E0))
                     }
                 }
             }
@@ -157,31 +188,38 @@ fun LessonQuizScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        // Tombol Periksa / Lanjut
         if (!isSubmitted) {
             Button(
-                onClick = { isSubmitted = true },
+                onClick = {
+                    isSubmitted = true
+                    if (!isAnswerCorrect && isExamMode) {
+                        hearts = (hearts - 1).coerceAtLeast(0)
+                    }
+                },
                 enabled = selectedOptionIndex != null,
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2E7D32))
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF58CC02))
             ) {
-                Text("Periksa Jawaban", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                Text("PERIKSA JAWABAN", fontWeight = FontWeight.Black, fontSize = 15.sp, color = Color.White)
             }
         } else {
             Button(
                 onClick = {
-                    onComplete(isAnswerCorrect)
+                    onComplete(isAnswerCorrect, hearts)
                 },
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isAnswerCorrect) Color(0xFF2E7D32) else Color(0xFFE65100)
+                    containerColor = if (isAnswerCorrect) Color(0xFF58CC02) else Color(0xFFE65100)
                 ),
                 modifier = Modifier.fillMaxWidth().height(52.dp),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Text(
-                    text = if (isAnswerCorrect) "Luar Biasa! Lanjut (+25 XP) 🚀" else "Saya Mengerti, Lanjutkan (-5 XP) ➔",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp
+                    text = if (isAnswerCorrect) "Luar Biasa! Lanjut ➔" else "Saya Mengerti, Coba Lagi",
+                    fontWeight = FontWeight.Black,
+                    fontSize = 15.sp,
+                    color = Color.White
                 )
             }
         }
