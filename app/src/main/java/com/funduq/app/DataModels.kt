@@ -1,12 +1,12 @@
 package com.funduq.app
 
-// 1. Profil Pengguna
 data class UserProfile(
     val accessCode: String = "",
     val name: String = "",
     val city: String = "",
     val phoneNumber: String = "",
     val deviceId: String = "",
+    val avatar: String = "👳‍♂️", // Tambahan kolom avatar karakter santri
     val selectedLevelId: String = "Yafi' (12-15 Tahun)",
     val selectedBookTitle: String = "Arbain Nawawi",
     val totalXp: Int = 0,
@@ -20,7 +20,6 @@ data class UserProfile(
     val failedLessons: List<String> = emptyList()
 )
 
-// 2. Model Pembelajaran
 data class Lesson(
     val id: String = "",
     val levelCategory: String = "Yafi'",
@@ -41,7 +40,6 @@ data class Lesson(
     val isExam: Boolean = false
 )
 
-// 3. Model Butir Soal & Section
 data class QuestionItem(
     val id: String = "",
     val arabicText: String = "",
@@ -67,7 +65,6 @@ data class ChapterExam(
     val questions: List<QuestionItem> = emptyList()
 )
 
-// 4. Model Bab & Kitab (YANG DICARI OLEH FIREBASE REPOSITORY)
 data class Chapter(
     val chapterId: String = "",
     val bookId: String = "",
@@ -88,7 +85,13 @@ data class BookItem(
     val chapters: List<Chapter> = emptyList()
 )
 
-// 5. Pilihan Kitab & Level untuk UI Layar
+// Model Data Top Santri untuk Halaman Depan
+data class TopSantri(
+    val name: String = "",
+    val totalXp: Int = 0,
+    val completedBooksCount: Int = 0
+)
+
 data class BookOption(
     val title: String,
     val category: String,
@@ -114,3 +117,23 @@ val MASTER_AGE_LEVELS = listOf(
     "Syabab (18-21 Tahun)",
     "Umum / Semua Usia"
 )
+
+// Model Data Progres & Informasi Kitab
+data class BookProgressInfo(
+    val bookTitle: String,
+    val fieldType: String = "Kajian Turats",
+    val author: String = "Ulama Salaf",
+    val description: String = "",
+    val completedCount: Int = 0,
+    val totalCount: Int = 0
+) {
+    val progressPercentage: Int
+        get() = if (totalCount > 0) ((completedCount.toFloat() / totalCount.toFloat()) * 100).toInt() else 0
+
+    val isCompleted: Boolean
+        get() = totalCount > 0 && completedCount >= totalCount
+
+    val isNew: Boolean
+        get() = completedCount == 0
+}
+

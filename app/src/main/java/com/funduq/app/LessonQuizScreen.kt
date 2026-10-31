@@ -1,5 +1,9 @@
 package com.funduq.app
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.view.View
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,10 +16,32 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.ui.text.style.TextAlign
+
+
+// --- CAPTURE SCREENSHOT CONTROLLER ---
+class CaptureController(val view: View) {
+    fun capture(): Bitmap {
+        val bitmap = Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        view.draw(canvas)
+        return bitmap
+    }
+}
+
+@Composable
+fun rememberCaptureController(): CaptureController {
+    val view = LocalView.current
+    return remember(view) { CaptureController(view) }
+}
 
 @Composable
 fun LessonQuizScreen(
@@ -25,6 +51,9 @@ fun LessonQuizScreen(
     onComplete: (isCorrect: Boolean, remainingHearts: Int) -> Unit,
     onBack: () -> Unit
 ) {
+    val context = LocalContext.current
+    val captureController = rememberCaptureController()
+
     var selectedOptionIndex by remember(lesson) { mutableStateOf<Int?>(null) }
     var isSubmitted by remember(lesson) { mutableStateOf(false) }
     var hearts by remember { mutableIntStateOf(initialHearts) }
@@ -35,44 +64,69 @@ fun LessonQuizScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF131F24)) // Gelap Duolingo
+            .background(Color(0xFF131F24))
             .statusBarsPadding()
+            .navigationBarsPadding() // 🛡️ BANTALAN PENGAMAN BAWAH AGAR TIDAK BENTROK DENGAN TOMBOL HOME HP
             .padding(16.dp)
             .verticalScroll(rememberScrollState())
     ) {
-        // Bar Atas: Tombol Keluar & Indikator Hati / XP
+        // Bar Atas: Tombol Keluar, Kontrol Suara, Lapor, & Bagikan
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
             modifier = Modifier.fillMaxWidth()
         ) {
-            TextButton(onClick = onBack) {
-                Text("✕ Keluar", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(onClick = onBack) {
+                    Text("✕ Keluar", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+
+                // 🔊 CONTROL SUARA / MUTE
+                var isMutedState by remember { mutableStateOf(SoundManager.isMuted) }
+                IconButton(onClick = {
+                    isMutedState = SoundManager.toggleMute(context)
+                }) {
+                    Text(if (isMutedState) "🔇" else "🔊", fontSize = 16.sp)
+                }
+
+                // ⚠️ TOMBOL LAPORKAN KENDALA SOAL (!)
+                IconButton(onClick = {
+                    try {
+                        val screenshot: Bitmap = captureController.capture()
+                        ShareHelper.reportQuestionToAdmin(context, screenshot, lesson.question)
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Gagal mengambil tangkapan layar", Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Text("⚠️", fontSize = 16.sp)
+                }
+
+                // 📢 TOMBOL BAGIKAN SOAL (SHARE)
+                IconButton(onClick = {
+                    try {
+                        val screenshot: Bitmap = captureController.capture()
+                        ShareHelper.shareQuestionToFriends(context, screenshot)
+                    } catch (e: Exception) {
+                        Toast.makeText(context, "Gagal membagikan gambar", Toast.LENGTH_SHORT).show()
+                    }
+                }) {
+                    Text("📢", fontSize = 16.sp)
+                }
             }
 
             if (isExamMode) {
-                // Tampilan 3 Hati untuk Ujian Loncat
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     repeat(3) { index ->
-                        Text(
-                            text = if (index < hearts) "❤️" else "🖤",
-                            fontSize = 20.sp,
-                            modifier = Modifier.padding(horizontal = 2.dp)
-                        )
+                        Text(text = if (index < hearts) "❤️" else "🖤", fontSize = 18.sp)
                     }
                 }
             } else {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
+                    shape = RoundedCornerShape(10.dp),
                     color = Color(0xFF202F36)
                 ) {
-                    Text(
-                        text = "⭐ +${lesson.rewardXp} XP",
-                        color = Color(0xFFFFD54F),
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
+                    Text("⭐ +${lesson.rewardXp} XP", color = Color(0xFFFFD54F), fontWeight = FontWeight.Bold, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp))
                 }
             }
         }
@@ -114,7 +168,7 @@ fun LessonQuizScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Pilihan Ganda Interaktif
+        // Pilihan Ganda
         lesson.options.forEachIndexed { index, option ->
             val isThisSelected = selectedOptionIndex == index
             val isThisTheCorrectAnswer = index == targetCorrectIndex
@@ -161,7 +215,7 @@ fun LessonQuizScreen(
             }
         }
 
-        // Kotak Penjelasan jika Salah
+        // Kotak Penjelasan
         if (isSubmitted && !isAnswerCorrect) {
             Spacer(modifier = Modifier.height(14.dp))
             Card(
@@ -188,17 +242,22 @@ fun LessonQuizScreen(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // Tombol Periksa / Lanjut
+        // Tombol Aksi (Dengan Jarak Aman Naik)
         if (!isSubmitted) {
             Button(
                 onClick = {
                     isSubmitted = true
-                    if (!isAnswerCorrect && isExamMode) {
-                        hearts = (hearts - 1).coerceAtLeast(0)
+                    if (isAnswerCorrect) {
+                        SoundManager.playSuccess() // 🔔 Musik Sukses!
+                    } else {
+                        SoundManager.playWrong()   // Salah
+                        if (isExamMode) hearts = (hearts - 1).coerceAtLeast(0)
                     }
                 },
                 enabled = selectedOptionIndex != null,
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF58CC02))
             ) {
@@ -212,7 +271,9 @@ fun LessonQuizScreen(
                 colors = ButtonDefaults.buttonColors(
                     containerColor = if (isAnswerCorrect) Color(0xFF58CC02) else Color(0xFFE65100)
                 ),
-                modifier = Modifier.fillMaxWidth().height(52.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Text(
@@ -223,5 +284,8 @@ fun LessonQuizScreen(
                 )
             }
         }
+
+        // Jarak Tepi Bawah Tambahan untuk Jaminan Bebas Bentrok di Segala Resolusi HP
+        Spacer(modifier = Modifier.height(12.dp))
     }
 }
