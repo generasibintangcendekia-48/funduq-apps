@@ -1,15 +1,26 @@
 package com.funduq.app
 
+import com.google.firebase.Firebase
+import com.google.firebase.firestore.DocumentSnapshot
+import com.google.firebase.firestore.ListenerRegistration
+import android.util.Log
 import com.google.firebase.firestore.AggregateSource
-import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.google.firebase.firestore.firestore
+import com.google.firebase.firestore.firestoreSettings
 import kotlinx.coroutines.tasks.await
+import java.text.ParseException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
 class FirebaseRepository {
-    private val db = FirebaseFirestore.getInstance()
+    // Inisialisasi Firestore dengan Offline Persistence aktif secara otomatis
+    private val db = Firebase.firestore.apply {
+        firestoreSettings = firestoreSettings {
+            isPersistenceEnabled = true // Otomatis simpan data kuis, materi & profil di HP (Bisa Offline)
+        }
+    }
     private val usersRef = db.collection("users")
     private val lessonsRef = db.collection("lessons")
 
@@ -80,7 +91,6 @@ class FirebaseRepository {
         }
     }
 
-
     // 1. Menghitung total santri terdaftar (Efisien Free Tier Spark)
     suspend fun getTotalRegisteredUsers(): Long {
         return try {
@@ -92,30 +102,108 @@ class FirebaseRepository {
         }
     }
 
-    // 2. Mengambil Top 5 Santri berdasarkan XP Tertinggi (Data Asli Firestore)
-    suspend fun getTop5Santri(): List<TopSantri> {
-        return try {
-            usersRef
-                .orderBy("totalXp", Query.Direction.DESCENDING)
-                .limit(5)
-                .get()
-                .await()
-                .documents.mapNotNull { doc ->
-                    val rawName = doc.getString("name") ?: doc.getString("displayName") ?: "Santri"
-                    val city = doc.getString("city") ?: ""
-                    val formattedName = if (city.isNotBlank()) "$rawName ($city)" else rawName
-                    val xp = doc.getLong("totalXp")?.toInt() ?: 0
-                    val completedList = doc.get("completedBooks") as? List<*>
+    // 2. Mengambil lima santri dengan aktivitas belajar terbaru
+    fun listenRecentSantriActivities(
+        onResult: (List<SantriActivity>, String?) -> Unit
+    ): ListenerRegistration {
+        val latestActivities = mutableMapOf<String, SantriActivity>()
+        val legacyActivities = mutableMapOf<String, SantriActivity>()
+        var latestError: String? = null
+        var legacyError: String? = null
 
-                    TopSantri(
-                        name = formattedName,
-                        totalXp = xp,
-                        completedBooksCount = completedList?.size ?: 0
-                    )
-                }
-        } catch (e: Exception) {
-            emptyList()
+        fun emitResults() {
+            val combined = (legacyActivities + latestActivities).values
+                .sortedByDescending { it.lastActivityAt }
+                .take(5)
+            onResult(combined, latestError ?: legacyError)
         }
+
+        val latestListener = usersRef
+            .orderBy("lastActivityAt", Query.Direction.DESCENDING)
+            .limit(5)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirebaseRepository", "Gagal memuat aktivitas santri terbaru", error)
+                    latestError = "Aktivitas login tidak dapat dimuat."
+                } else if (snapshot != null) {
+                    latestError = null
+                    latestActivities.clear()
+                    snapshot.documents.mapNotNull(::toSantriActivity).forEach { activity ->
+                        latestActivities[activity.id] = activity
+                    }
+                }
+                emitResults()
+            }
+
+        val legacyListener = usersRef
+            .orderBy("lastStudyDate", Query.Direction.DESCENDING)
+            .limit(5)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    Log.w("FirebaseRepository", "Gagal memuat histori belajar lama", error)
+                    legacyError = "Histori belajar lama tidak dapat dimuat."
+                } else if (snapshot != null) {
+                    legacyError = null
+                    legacyActivities.clear()
+                    snapshot.documents.mapNotNull(::toLegacyStudyActivity).forEach { activity ->
+                        legacyActivities[activity.id] = activity
+                    }
+                }
+                emitResults()
+            }
+
+        return object : ListenerRegistration {
+            override fun remove() {
+                latestListener.remove()
+                legacyListener.remove()
+            }
+        }
+    }
+
+    private fun toSantriActivity(document: DocumentSnapshot): SantriActivity? {
+        val activityAt = document.getLong("lastActivityAt") ?: 0L
+        val message = document.getString("lastActivityMessage").orEmpty()
+        if (activityAt <= 0L || message.isBlank()) return null
+
+        return SantriActivity(
+            id = document.id,
+            name = document.getString("name") ?: document.getString("displayName") ?: "Santri",
+            message = message,
+            lastActivityAt = activityAt
+        )
+    }
+
+    private fun toLegacyStudyActivity(document: DocumentSnapshot): SantriActivity? {
+        val studyDate = document.getString("lastStudyDate").orEmpty()
+        val activityAt = try {
+            SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false }
+                .parse(studyDate)?.time
+        } catch (_: ParseException) {
+            null
+        } ?: return null
+
+        return SantriActivity(
+            id = document.id,
+            name = document.getString("name") ?: document.getString("displayName") ?: "Santri",
+            message = "belajar terakhir pada $studyDate",
+            lastActivityAt = activityAt
+        )
+    }
+
+    fun recordUserActivity(user: UserProfile, message: String): UserProfile {
+        val updatedUser = user.copy(
+            lastActivityAt = System.currentTimeMillis(),
+            lastActivityMessage = message
+        )
+        usersRef.document(user.accessCode).update(
+            mapOf(
+                "lastActivityAt" to updatedUser.lastActivityAt,
+                "lastActivityMessage" to updatedUser.lastActivityMessage
+            )
+        ).addOnFailureListener { error ->
+            Log.w("FirebaseRepository", "Gagal menyimpan aktivitas santri", error)
+        }
+        return updatedUser
     }
 
     // 3. Simpan Pendaftaran User Baru
@@ -123,6 +211,19 @@ class FirebaseRepository {
         usersRef.document(user.accessCode).set(user)
             .addOnSuccessListener { onResult(true) }
             .addOnFailureListener { onResult(false) }
+    }
+
+    fun createUser(user: UserProfile, onResult: (Result<Boolean>) -> Unit) {
+        val userDocument = usersRef.document(user.accessCode)
+        db.runTransaction { transaction ->
+            if (transaction.get(userDocument).exists()) {
+                false
+            } else {
+                transaction.set(userDocument, user)
+                true
+            }
+        }.addOnSuccessListener { created -> onResult(Result.success(created)) }
+            .addOnFailureListener { error -> onResult(Result.failure(error)) }
     }
 
     // 4. Ambil Profil User Berdasarkan Kode Akses
@@ -135,8 +236,16 @@ class FirebaseRepository {
     }
 
     // 5. Logika Hasil Belajar: Jika Benar (+25 XP), Jika Salah (-5 XP, Pos Kuning)
-    fun updateLessonResult(user: UserProfile, lessonId: String, isCorrect: Boolean, onResult: (UserProfile) -> Unit) {
+    fun updateLessonResult(
+        user: UserProfile,
+        lessonId: String,
+        isCorrect: Boolean,
+        lessonTitle: String,
+        onResult: (UserProfile) -> Unit
+    ) {
         val today = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
+        val activityAt = System.currentTimeMillis()
+        val activityMessage = "mengerjakan soal: $lessonTitle"
 
         val updatedUser = if (isCorrect) {
             val newXp = user.totalXp + 25
@@ -149,6 +258,8 @@ class FirebaseRepository {
                 level = (kotlin.math.sqrt(newXp.toDouble()) / 10).toInt() + 1,
                 currentStreak = newStreak,
                 lastStudyDate = today,
+                lastActivityAt = activityAt,
+                lastActivityMessage = activityMessage,
                 completedLessons = newCompleted,
                 failedLessons = newFailed
             )
@@ -160,6 +271,8 @@ class FirebaseRepository {
             user.copy(
                 totalXp = newXp,
                 level = (kotlin.math.sqrt(newXp.toDouble()) / 10).toInt() + 1,
+                lastActivityAt = activityAt,
+                lastActivityMessage = activityMessage,
                 failedLessons = newFailed,
                 completedLessons = newCompleted
             )

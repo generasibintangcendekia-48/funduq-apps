@@ -4,8 +4,10 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
+import android.widget.VideoView
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,16 +24,53 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
 import com.funduq.app.ui.theme.FunduqAppTheme
-import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.delay
 
+enum class Screen { SPLASH, AUTH, SELECT_BOOK, DASHBOARD, QUIZ }
 
-enum class Screen { AUTH, SELECT_BOOK, DASHBOARD, QUIZ }
+// ==========================================
+// PALET WARNA PADANG PASIR & OASE TIMUR TENGAH
+// ==========================================
+private object DesertOasisPalette {
+    val SandSkyTop = Color(0xFFF7CF98)
+    val SandDuneLight = Color(0xFFF4C382)
+    val SandDuneDark = Color(0xFFE5A965)
+    val DesertText = Color(0xFF3D2110)
+    val HeaderBrownDark = Color(0xFF4A2816)
+    val HeaderBrownMid = Color(0xFF6B3C22)
+    val GoldBorder = Color(0xFFD49B54)
+    val OasisGreenTop = Color(0xFF65C81C)
+    val OasisGreenBottom = Color(0xFF479C0C)
+    val OasisGreenDark = Color(0xFF2D6604)
+    val WaterBlue = Color(0xFF38BDF8)
+}
+
+private object CurriculumPalette {
+    val Background = Color(0xFFF5EFE6)
+    val Card = Color(0xFFFFFDF9)
+    val Mint = Color(0xFFF0FAF6)
+    val Sand = Color(0xFFEBD9C3)
+    val Teal = Color(0xFF1E5E7A)
+    val Gold = Color(0xFFF2A922)
+    val Terracotta = Color(0xFFE0623A)
+    val Green = Color(0xFF2D9F75)
+    val GreenDark = Color(0xFF1E7554)
+    val Text = Color(0xFF2C221E)
+    val Muted = Color(0xFF8C776B)
+    val Border = Color(0xFF4A3728)
+}
 
 class MainActivity : ComponentActivity() {
     private val repo = FirebaseRepository()
@@ -45,7 +84,9 @@ class MainActivity : ComponentActivity() {
         setContent {
             FunduqAppTheme {
                 val currentContext = LocalContext.current
-                var currentScreen by remember { mutableStateOf(if (savedCode != null) Screen.DASHBOARD else Screen.AUTH) }
+
+                // 1. Awal buka aplikasi -> Tampilkan Layar SPLASH Video
+                var currentScreen by remember { mutableStateOf(Screen.SPLASH) }
                 var currentUser by remember { mutableStateOf<UserProfile?>(null) }
 
                 var lessonsList by remember { mutableStateOf<List<Lesson>>(emptyList()) }
@@ -55,36 +96,42 @@ class MainActivity : ComponentActivity() {
                 var examQuestionsPool by remember { mutableStateOf<List<Lesson>>(emptyList()) }
                 var currentExamQuestionIndex by remember { mutableIntStateOf(0) }
 
-                // State Data Real untuk TuratsGo Landing Screen
-                var totalUsers by remember { mutableStateOf(0L) }
-                var topSantriList by remember { mutableStateOf<List<TopSantri>>(emptyList()) }
-                // State untuk memicu Pop-up Selamat Kelulusan Unit
+                var totalUsers by remember { mutableLongStateOf(0L) }
+                var topSantriList by remember { mutableStateOf<List<SantriActivity>>(emptyList()) }
+                var activityFeedError by remember { mutableStateOf<String?>(null) }
                 var showUnitCompletionCelebration by remember { mutableStateOf<String?>(null) }
-
 
                 // Auto-login sesi tersimpan
                 LaunchedEffect(Unit) {
                     if (savedCode != null) {
                         repo.getUser(savedCode) { loadedUser ->
                             if (loadedUser != null) {
-                                currentUser = loadedUser
+                                currentUser = repo.recordUserActivity(loadedUser, "masuk untuk belajar")
                             } else {
                                 sharedPref.edit().clear().apply()
-                                currentScreen = Screen.AUTH
                             }
                         }
                     }
                 }
 
-                // Ambil data real Firestore untuk ditampilkan di Landing Page
                 LaunchedEffect(currentScreen) {
                     if (currentScreen == Screen.AUTH) {
                         totalUsers = repo.getTotalRegisteredUsers()
-                        topSantriList = repo.getTop5Santri()
                     }
                 }
 
-                // Ambil materi untuk kitab yang sedang dipilih santri
+                DisposableEffect(currentScreen) {
+                    val activityListener = if (currentScreen == Screen.AUTH) {
+                        repo.listenRecentSantriActivities { activities, error ->
+                            topSantriList = activities
+                            activityFeedError = error
+                        }
+                    } else {
+                        null
+                    }
+                    onDispose { activityListener?.remove() }
+                }
+
                 LaunchedEffect(currentScreen, currentUser?.selectedBookTitle) {
                     val bookTitle = currentUser?.selectedBookTitle
                     if (currentScreen == Screen.DASHBOARD && !bookTitle.isNullOrBlank()) {
@@ -96,14 +143,31 @@ class MainActivity : ComponentActivity() {
 
                 Surface(
                     modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF131F24)
+                    color = Color(0xFF2B1D12)
                 ) {
                     when (currentScreen) {
+                        // 0. LAYAR INTRO / SPLASH VIDEO
+                        Screen.SPLASH -> {
+                            SplashVideoScreen(
+                                onVideoFinished = {
+                                    // Selesai video: jika sudah login masuk DASHBOARD, jika belum masuk AUTH
+                                    currentScreen = if (savedCode != null && currentUser != null) {
+                                        Screen.DASHBOARD
+                                    } else if (savedCode != null) {
+                                        Screen.DASHBOARD
+                                    } else {
+                                        Screen.AUTH
+                                    }
+                                }
+                            )
+                        }
+
                         // 1. LAYAR UTAMA: TURATSGO LANDING SCREEN
                         Screen.AUTH -> {
                             TuratsGoLandingScreen(
                                 totalUsers = totalUsers,
                                 topUsers = topSantriList,
+                                activityFeedError = activityFeedError,
                                 registeredAccessCode = savedCode,
                                 onLoginWithCode = { kodeInput ->
                                     val cleanedCode = kodeInput.trim()
@@ -113,7 +177,7 @@ class MainActivity : ComponentActivity() {
                                         repo.getUser(cleanedCode) { user ->
                                             if (user != null) {
                                                 sharedPref.edit().putString("saved_access_code", user.accessCode).apply()
-                                                currentUser = user
+                                                currentUser = repo.recordUserActivity(user, "masuk untuk belajar")
                                                 currentScreen = Screen.DASHBOARD
                                                 Toast.makeText(currentContext, "Ahlan wa Sahlan, ${user.name}! 👋", Toast.LENGTH_SHORT).show()
                                             } else {
@@ -122,30 +186,46 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 },
-                                onRegisterNewUser = { name, city ->
-                                    // Generate kode unik FDQ-XXXX otomatis
+                                onRegisterNewUser = { name, province, city, phoneNumber, onResult ->
                                     val randomNum = (1000..9999).random()
                                     val generatedCode = "FDQ-$randomNum"
                                     val newUser = UserProfile(
                                         accessCode = generatedCode,
                                         name = name,
                                         city = city,
+                                        province = province,
+                                        phoneNumber = phoneNumber,
+                                        deviceId = DeviceSupportHelper.getDeviceId(currentContext),
                                         totalXp = 0,
-                                        currentStreak = 1
+                                        currentStreak = 1,
+                                        lastActivityAt = System.currentTimeMillis(),
+                                        lastActivityMessage = "bergabung di TuratsGo"
                                     )
-                                    repo.registerUser(newUser) { success ->
-                                        if (success) {
-                                            sharedPref.edit().putString("saved_access_code", generatedCode).apply()
-                                            currentUser = newUser
-                                            currentScreen = Screen.SELECT_BOOK
-                                            Toast.makeText(currentContext, "Akun berhasil dibuat! Kode Anda: $generatedCode", Toast.LENGTH_LONG).show()
-                                        } else {
-                                            Toast.makeText(currentContext, "Gagal membuat akun, periksa internet Anda", Toast.LENGTH_SHORT).show()
-                                        }
+                                    repo.createUser(newUser) { result ->
+                                        result.fold(
+                                            onSuccess = { created ->
+                                                if (created) {
+                                                    sharedPref.edit().putString("saved_access_code", generatedCode).apply()
+                                                    currentUser = newUser
+                                                    onResult(Result.success(newUser))
+                                                } else {
+                                                    onResult(
+                                                        Result.failure(
+                                                            IllegalStateException("Kode akses bentrok. Silakan tekan Buat Akun lagi.")
+                                                        )
+                                                    )
+                                                }
+                                            },
+                                            onFailure = { error ->
+                                                onResult(Result.failure(error))
+                                            }
+                                        )
                                     }
+                                },
+                                onContinueAfterRegistration = {
+                                    currentScreen = Screen.SELECT_BOOK
                                 }
                             )
-
                         }
 
                         // 2. PILIH KELAS & KITAB
@@ -167,8 +247,6 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
                         }
-
-
 
                         // 3. DASBOR UTAMA
                         Screen.DASHBOARD -> {
@@ -216,11 +294,10 @@ class MainActivity : ComponentActivity() {
                                         sharedPref.edit().clear().apply()
                                         currentUser = null
                                         currentScreen = Screen.AUTH
-                                    }, // <--- Pastikan ada tanda koma di sini sebelum parameter baru!
+                                    },
                                     showUnitCelebrationInDashboard = showUnitCompletionCelebration,
                                     onDismissCelebration = { showUnitCompletionCelebration = null }
                                 )
-
                             }
                         }
 
@@ -241,6 +318,9 @@ class MainActivity : ComponentActivity() {
                                         currentHearts = remainingHearts
                                         currentUser?.let { user ->
                                             if (isBypassExamActive) {
+                                                val activityAt = System.currentTimeMillis()
+                                                val activityMessage = "mengerjakan soal: ${activeLesson.title}"
+                                                repo.recordUserActivity(user, activityMessage)
                                                 if (remainingHearts <= 0) {
                                                     Toast.makeText(currentContext, "Ujian Gagal. Coba lagi!", Toast.LENGTH_SHORT).show()
                                                     currentScreen = Screen.DASHBOARD
@@ -249,15 +329,16 @@ class MainActivity : ComponentActivity() {
                                                         currentExamQuestionIndex++
                                                         currentActiveLessonId = examQuestionsPool[currentExamQuestionIndex].id
                                                     } else {
-                                                        // UJIAN BYPASS SELESAI -> PICU POP-UP SELEBRASI UNIT!
                                                         val targetUnitLessons = lessonsList.filter { it.unitTitle == activeLesson.unitTitle }.map { it.id }
                                                         val updated = user.copy(
                                                             completedLessons = (user.completedLessons + targetUnitLessons).distinct(),
-                                                            totalXp = user.totalXp + 50
+                                                            totalXp = user.totalXp + 50,
+                                                            lastActivityAt = activityAt,
+                                                            lastActivityMessage = activityMessage
                                                         )
                                                         repo.registerUser(updated) {
                                                             currentUser = updated
-                                                            showUnitCompletionCelebration = activeLesson.unitTitle // <--- PICU SELEBRASI
+                                                            showUnitCompletionCelebration = activeLesson.unitTitle
                                                             currentScreen = Screen.DASHBOARD
                                                         }
                                                     }
@@ -270,8 +351,12 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                 }
                                             } else {
-                                                // MODE SOAL BIASA BERURUTAN
-                                                repo.updateLessonResult(user, activeLesson.id, isCorrect) { updatedUser ->
+                                                repo.updateLessonResult(
+                                                    user,
+                                                    activeLesson.id,
+                                                    isCorrect,
+                                                    activeLesson.title
+                                                ) { updatedUser ->
                                                     currentUser = updatedUser
                                                     if (isCorrect) {
                                                         val regularLessons = lessonsList.filter { !it.isExam }
@@ -283,8 +368,7 @@ class MainActivity : ComponentActivity() {
                                                             currentActiveLessonId = nextUnfinishedLesson.id
                                                             Toast.makeText(currentContext, "+25 XP! Lanjut 🔥", Toast.LENGTH_SHORT).show()
                                                         } else {
-                                                            // UNIT SELESAI SECARA BERURUTAN -> PICU POP-UP SELEBRASI UNIT!
-                                                            showUnitCompletionCelebration = activeLesson.unitTitle // <--- PICU SELEBRASI
+                                                            showUnitCompletionCelebration = activeLesson.unitTitle
                                                             currentScreen = Screen.DASHBOARD
                                                         }
                                                     } else {
@@ -300,15 +384,100 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
-
-
             }
-
         }
     }
 }
 
-// 1. LAYAR PILIH KELAS & KITAB (100% DATABASE DINAMIS)
+// ==========================================
+// 0. KOMPONEN INTRO VIDEO SPLASH
+// ==========================================
+@Composable
+fun SplashVideoScreen(
+    onVideoFinished: () -> Unit
+) {
+    val context = LocalContext.current
+    var isFinished by remember { mutableStateOf(false) }
+
+    // TIMER CADANGAN (FAIL-SAFE):
+    // Jika video berdurasi misal 3-4 detik, paksa tunggu durasi tersebut agar tidak langsung tertutup
+    LaunchedEffect(Unit) {
+        delay(3500) // 3.5 detik (sesuaikan dengan panjang video Anda)
+        if (!isFinished) {
+            isFinished = true
+            onVideoFinished()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center
+    ) {
+        AndroidView(
+            factory = { ctx ->
+                VideoView(ctx).apply {
+                    val videoUri = Uri.parse("android.resource://${ctx.packageName}/${R.raw.splash_video}")
+                    setVideoURI(videoUri)
+
+                    setOnPreparedListener { mp ->
+                        mp.isLooping = false
+                        // Nonaktifkan audio jika ingin sunyi atau biarkan bersuara
+                        start()
+                    }
+
+                    setOnCompletionListener {
+                        if (!isFinished) {
+                            isFinished = true
+                            onVideoFinished()
+                        }
+                    }
+
+                    setOnErrorListener { _, what, extra ->
+                        android.util.Log.e("SPLASH_VIDEO", "Video error code: $what, extra: $extra")
+                        // Jangan langsung pindah instan, biarkan timer delay di atas yang mengurusnya
+                        true
+                    }
+                }
+            },
+            modifier = Modifier.fillMaxSize()
+        )
+
+        // Tombol Lewati Manual
+        TextButton(
+            onClick = {
+                if (!isFinished) {
+                    isFinished = true
+                    onVideoFinished()
+                }
+            },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(16.dp)
+        ) {
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = Color.Black.copy(alpha = 0.6f),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.4f))
+            ) {
+                Text(
+                    text = "Lewati ➔",
+                    color = Color.White,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                )
+            }
+        }
+    }
+}
+
+
+// ==========================================
+// 1. LAYAR PILIH KELAS & KITAB
+// ==========================================
 @Composable
 fun SelectBookPureDatabaseScreen(
     currentLevel: String,
@@ -324,7 +493,6 @@ fun SelectBookPureDatabaseScreen(
     var selectedLevelName by remember { mutableStateOf(currentLevel) }
     var selectedBookTitle by remember { mutableStateOf(currentBook) }
 
-    // Dialog State
     var selectedBookForInfo by remember { mutableStateOf<BookProgressInfo?>(null) }
     var bookToPrintCertificate by remember { mutableStateOf<BookProgressInfo?>(null) }
 
@@ -348,344 +516,446 @@ fun SelectBookPureDatabaseScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF131F24))
+            .background(CurriculumPalette.Background)
             .statusBarsPadding()
-            .padding(horizontal = 20.dp, vertical = 14.dp)
-            .verticalScroll(rememberScrollState())
     ) {
-        // Tombol Kembali
-        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            IconButton(onClick = onBack) {
-                Text("✕", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Surface(
+                onClick = onBack,
+                shape = RoundedCornerShape(14.dp),
+                color = CurriculumPalette.Card,
+                border = androidx.compose.foundation.BorderStroke(2.dp, CurriculumPalette.Border),
+                shadowElevation = 4.dp,
+                modifier = Modifier.size(46.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text("‹", color = CurriculumPalette.Border, fontSize = 32.sp, fontWeight = FontWeight.Bold)
+                }
             }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("🐪", fontSize = 52.sp)
-            Spacer(modifier = Modifier.width(12.dp))
             Card(
                 shape = RoundedCornerShape(18.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF202F36))
+                colors = CardDefaults.cardColors(containerColor = CurriculumPalette.Teal),
+                border = androidx.compose.foundation.BorderStroke(2.dp, CurriculumPalette.Border),
+                elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                modifier = Modifier.weight(1f)
             ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("🐪", fontSize = 36.sp)
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            "🌟 JALUR KURIKULUM",
+                            color = CurriculumPalette.Gold,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
+                        Text(
+                            text = "Pilih Jenjang & Kitab",
+                            color = Color.White,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 14.dp)
+        ) {
+            Spacer(modifier = Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = CurriculumPalette.Gold,
+                        shadowElevation = 2.dp
+                    ) {
+                        Text(
+                            "1",
+                            color = CurriculumPalette.Text,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        "JENJANG / KELAS SANTRI",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = CurriculumPalette.Border
+                    )
+                }
                 Text(
-                    text = "Pilih Jenjang & Kitab Kurikulum:",
-                    color = Color.White,
+                    "Pilih salah satu",
+                    fontSize = 10.sp,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 14.sp,
-                    modifier = Modifier.padding(14.dp)
+                    color = CurriculumPalette.Teal,
+                    modifier = Modifier
+                        .background(CurriculumPalette.Teal.copy(alpha = 0.1f), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
                 )
             }
-        }
+            Spacer(modifier = Modifier.height(8.dp))
 
-        Spacer(modifier = Modifier.height(20.dp))
-        Text("1. JENJANG / KELAS", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF9E9E9E))
-        Spacer(modifier = Modifier.height(8.dp))
-
-        if (dbCurriculumMap.isEmpty()) {
-            Card(
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF202F36)),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Memuat kurikulum...", color = Color.Gray, fontSize = 13.sp, modifier = Modifier.padding(16.dp))
-            }
-        } else {
-            dbCurriculumMap.keys.forEach { levelKey ->
-                val isSelected = selectedLevelName == levelKey
+            if (dbCurriculumMap.isEmpty()) {
                 Card(
                     shape = RoundedCornerShape(14.dp),
-                    colors = CardDefaults.cardColors(containerColor = if (isSelected) Color(0xFF2E7D32) else Color(0xFF202F36)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 4.dp)
-                        .clickable {
-                            selectedLevelName = levelKey
-                            selectedBookTitle = dbCurriculumMap[levelKey]?.firstOrNull() ?: ""
-                        }
+                    colors = CardDefaults.cardColors(containerColor = CurriculumPalette.Card),
+                    border = androidx.compose.foundation.BorderStroke(2.dp, CurriculumPalette.Border),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text(if (isSelected) "🟢" else "⚪", fontSize = 18.sp)
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(levelKey, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 15.sp)
-                            Text("${dbCurriculumMap[levelKey]?.size} Kitab Tersedia", fontSize = 11.sp, color = Color(0xFF81C784))
-                        }
-                    }
-                }
-            }
-        }
-
-        Spacer(modifier = Modifier.height(22.dp))
-        Text("2. DAFTAR KITAB & STATUS PROGRES", fontSize = 12.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF9E9E9E))
-        Spacer(modifier = Modifier.height(8.dp))
-
-        availableBooks.forEach { bookName ->
-            val isChosen = selectedBookTitle == bookName
-            val bookInfo = booksProgressList.firstOrNull { it.bookTitle.equals(bookName, ignoreCase = true) }
-                ?: BookProgressInfo(bookTitle = bookName)
-
-            Card(
-                shape = RoundedCornerShape(16.dp),
-                colors = CardDefaults.cardColors(
-                    containerColor = if (isChosen) Color(0xFF1E382B) else Color(0xFF202F36)
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 6.dp)
-                    .border(
-                        width = if (isChosen) 2.dp else 0.dp,
-                        color = if (isChosen) Color(0xFF58CC02) else Color.Transparent,
-                        shape = RoundedCornerShape(16.dp)
+                    Text(
+                        "Memuat kurikulum...",
+                        color = CurriculumPalette.Muted,
+                        fontSize = 13.sp,
+                        modifier = Modifier.padding(16.dp)
                     )
-                    .clickable { selectedBookTitle = bookName }
-            ) {
-                Column(modifier = Modifier.padding(14.dp)) {
-                    // Bagian Atas: Label FieldType & Icon Info (!)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                }
+            } else {
+                dbCurriculumMap.keys.forEach { levelKey ->
+                    val isSelected = selectedLevelName == levelKey
+                    Card(
+                        shape = RoundedCornerShape(14.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = if (isSelected) CurriculumPalette.Mint else CurriculumPalette.Card
+                        ),
+                        border = androidx.compose.foundation.BorderStroke(
+                            width = if (isSelected) 2.dp else 1.dp,
+                            color = if (isSelected) CurriculumPalette.Green else CurriculumPalette.Sand
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 5.dp else 3.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp)
+                            .clickable {
+                                selectedLevelName = levelKey
+                                selectedBookTitle = dbCurriculumMap[levelKey]?.firstOrNull() ?: ""
+                            }
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = Color(0xFF131F24)
-                        ) {
-                            Text(
-                                text = "🏷️ ${bookInfo.fieldType}",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFFFFD54F),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
-                            )
-                        }
-
-                        // Icon Info (!) di pojok kanan atas
-                        IconButton(
-                            onClick = { selectedBookForInfo = bookInfo },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Text("ℹ️", fontSize = 18.sp)
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Bagian Tengah: Judul & Badge Status
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
-                            Text("📖", fontSize = 24.sp)
-                            Spacer(modifier = Modifier.width(10.dp))
-                            Text(
-                                text = bookName,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                fontSize = 15.sp
-                            )
-                        }
-
-                        // Badge Progres Status
-                        when {
-                            bookInfo.isCompleted -> {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFF2E7D32)
-                                ) {
-                                    Text(
-                                        text = "🏅 Tamat",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
+                        Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = CircleShape,
+                                color = if (isSelected) CurriculumPalette.Green else Color(0xFFE6E2DD),
+                                border = androidx.compose.foundation.BorderStroke(2.dp, CurriculumPalette.Border),
+                                modifier = Modifier.size(26.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (isSelected) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(9.dp)
+                                                .background(Color.White, CircleShape)
+                                        )
+                                    }
                                 }
                             }
-                            bookInfo.isNew -> {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = Color(0xFF0284C7)
-                                ) {
-                                    Text(
-                                        text = "✨ NEW!",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color.White,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-                            else -> {
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = "💧 ${bookInfo.progressPercentage}% (${bookInfo.completedCount}/${bookInfo.totalCount})",
+                                    levelKey,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CurriculumPalette.Text,
+                                    fontSize = 15.sp
+                                )
+                                Text(
+                                    "📖 ${dbCurriculumMap[levelKey]?.size} Kitab Tersedia",
                                     fontSize = 11.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = Color(0xFF81C784)
+                                    color = CurriculumPalette.GreenDark
                                 )
                             }
+                            if (isSelected) Text("🌴", fontSize = 20.sp)
                         }
                     }
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(12.dp))
-
-                    // Tombol Unduh Sertifikat (Disable jika belum tamat)
-                    Button(
-                        onClick = { bookToPrintCertificate = bookInfo },
-                        enabled = bookInfo.isCompleted,
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFFF59E0B),
-                            disabledContainerColor = Color(0xFF2E383F)
-                        ),
-                        modifier = Modifier.fillMaxWidth().height(38.dp)
+            Spacer(modifier = Modifier.height(20.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(7.dp),
+                        color = CurriculumPalette.Terracotta,
+                        shadowElevation = 2.dp
                     ) {
                         Text(
-                            text = if (bookInfo.isCompleted) "📜 Unduh Sertifikat Kelulusan" else "🔒 Selesaikan Kitab untuk Buka Sertifikat",
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (bookInfo.isCompleted) Color.Black else Color.Gray
+                            "2",
+                            color = Color.White,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 12.sp,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
                         )
+                    }
+                    Spacer(modifier = Modifier.width(7.dp))
+                    Text(
+                        "DAFTAR KITAB & STATUS PROGRES",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = CurriculumPalette.Border
+                    )
+                }
+                Text(
+                    "Tersedia ${availableBooks.size} kitab",
+                    fontSize = 10.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CurriculumPalette.Muted
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+
+            availableBooks.forEach { bookName ->
+                val isChosen = selectedBookTitle == bookName
+                val bookInfo = booksProgressList.firstOrNull { it.bookTitle.equals(bookName, ignoreCase = true) }
+                    ?: BookProgressInfo(bookTitle = bookName)
+
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isChosen) CurriculumPalette.Mint else CurriculumPalette.Card
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = if (isChosen) 5.dp else 3.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 6.dp)
+                        .border(
+                            width = if (isChosen) 2.dp else 1.dp,
+                            color = if (isChosen) CurriculumPalette.Green else CurriculumPalette.Sand,
+                            shape = RoundedCornerShape(16.dp)
+                        )
+                        .clickable { selectedBookTitle = bookName }
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = Color(0xFFFFF1D5),
+                                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFF0D49A))
+                            ) {
+                                Text(
+                                    text = "🏷️ ${bookInfo.fieldType.uppercase()}",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF795012),
+                                    modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp)
+                                )
+                            }
+
+                            Surface(
+                                onClick = { selectedBookForInfo = bookInfo },
+                                shape = RoundedCornerShape(9.dp),
+                                color = CurriculumPalette.Teal.copy(alpha = 0.1f),
+                                border = androidx.compose.foundation.BorderStroke(
+                                    1.dp,
+                                    CurriculumPalette.Teal.copy(alpha = 0.25f)
+                                ),
+                                modifier = Modifier.size(30.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text("i", color = CurriculumPalette.Teal, fontSize = 15.sp, fontWeight = FontWeight.Black)
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = if (isChosen) Color(0xFFDDF2E9) else Color(0xFFF2E8DA),
+                                    border = androidx.compose.foundation.BorderStroke(
+                                        1.dp,
+                                        CurriculumPalette.Sand.copy(alpha = 0.8f)
+                                    ),
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text("📖", fontSize = 19.sp)
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = bookName,
+                                    fontWeight = FontWeight.Bold,
+                                    color = CurriculumPalette.Text,
+                                    fontSize = 15.sp
+                                )
+                            }
+
+                            when {
+                                bookInfo.isCompleted -> {
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = CurriculumPalette.Green,
+                                        shadowElevation = 2.dp
+                                    ) {
+                                        Text(
+                                            text = "🏅 Tamat",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                                bookInfo.isNew -> {
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = Color(0xFF1687B8),
+                                        shadowElevation = 2.dp
+                                    ) {
+                                        Text(
+                                            text = "✨ NEW!",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                                        )
+                                    }
+                                }
+                                else -> {
+                                    Text(
+                                        text = "💧 ${bookInfo.progressPercentage}% (${bookInfo.completedCount}/${bookInfo.totalCount})",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = CurriculumPalette.GreenDark
+                                    )
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        Button(
+                            onClick = { bookToPrintCertificate = bookInfo },
+                            enabled = bookInfo.isCompleted,
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = CurriculumPalette.Gold,
+                                disabledContainerColor = Color(0xFFEDEAE5)
+                            ),
+                            border = androidx.compose.foundation.BorderStroke(
+                                1.dp,
+                                if (bookInfo.isCompleted) Color(0xFFC7830F) else Color(0xFFD9D3CA)
+                            ),
+                            modifier = Modifier.fillMaxWidth().height(40.dp)
+                        ) {
+                            Text(
+                                text = if (bookInfo.isCompleted) "📜 Unduh Sertifikat Kelulusan" else "🔒 Selesaikan Kitab untuk Buka Sertifikat",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (bookInfo.isCompleted) CurriculumPalette.Text else Color(0xFF8C8984)
+                            )
+                        }
                     }
                 }
             }
         }
 
-        // ==========================================
-// DIALOG SELEBRASI KELULUSAN UNIT MEGAH 🎉
-// ==========================================
-        @Composable
-        fun UnitCompletionCelebrationDialog(
-            unitTitle: String,
-            onDismiss: () -> Unit
+        Surface(
+            color = CurriculumPalette.Background,
+            shadowElevation = 8.dp
         ) {
-            AlertDialog(
-                onDismissRequest = onDismiss,
-                shape = RoundedCornerShape(22.dp),
-                containerColor = Color(0xFF0F172A),
-                title = {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text("🎉 ALHAMDULILLAH! 🎉", fontSize = 22.sp, fontWeight = FontWeight.Black, color = Color(0xFFFACC15))
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text("Unit Selesai Sempurna!", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                },
-                text = {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Text("🌴", fontSize = 48.sp)
-                        Text(
-                            text = "Selamat! Kamu telah menuntaskan seluruh butir materi latihan dan ujian pada:\n\n\"$unitTitle\"",
-                            color = Color.LightGray,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.Center,
-                            lineHeight = 18.sp
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = Color(0xFF1E382B)
-                        ) {
-                            Text(
-                                text = "🎁 Bonus Khatam: +50 XP & Progres Air Terisi! 💧",
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF69F0AE),
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(
-                        onClick = onDismiss,
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF58CC02)),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text("KEMBALI KE BERANDA ➔", fontWeight = FontWeight.Bold, color = Color.White)
-                    }
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 20.dp, vertical = 10.dp)
+            ) {
+                Button(
+                    onClick = { onConfirm(selectedLevelName, selectedBookTitle) },
+                    modifier = Modifier.fillMaxWidth().height(56.dp),
+                    shape = RoundedCornerShape(16.dp),
+                    border = androidx.compose.foundation.BorderStroke(2.dp, CurriculumPalette.Border),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 5.dp, pressedElevation = 1.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = CurriculumPalette.Terracotta),
+                    enabled = selectedBookTitle.isNotBlank()
+                ) {
+                    Text("LANJUTKAN KE JALUR BELAJAR ➔", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
                 }
-            )
+            }
         }
-
-
-        Spacer(modifier = Modifier.height(26.dp))
-        Button(
-            onClick = { onConfirm(selectedLevelName, selectedBookTitle) },
-            modifier = Modifier.fillMaxWidth().height(52.dp),
-            shape = RoundedCornerShape(16.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF58CC02)),
-            enabled = selectedBookTitle.isNotBlank()
-        ) {
-            Text("LANJUTKAN KE JALUR BELAJAR ➔", fontWeight = FontWeight.Black, fontSize = 14.sp, color = Color.White)
-        }
-        Spacer(modifier = Modifier.height(20.dp))
     }
 
-    // --- POP-UP 1: INFORMASI DETAIL KITAB DARI DATA CSV ---
     selectedBookForInfo?.let { info ->
         AlertDialog(
             onDismissRequest = { selectedBookForInfo = null },
-            shape = RoundedCornerShape(20.dp),
-            containerColor = Color(0xFF1E293B),
+            shape = RoundedCornerShape(24.dp),
+            containerColor = CurriculumPalette.Card,
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text("ℹ️", fontSize = 22.sp)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text(info.bookTitle, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                    Text(info.bookTitle, color = CurriculumPalette.Text, fontWeight = FontWeight.Bold, fontSize = 16.sp)
                 }
             },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Column {
-                        Text("Disiplin Ilmu:", fontSize = 11.sp, color = Color.Gray)
-                        Text("📚 ${info.fieldType}", color = Color(0xFFFFD54F), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                        Text("Disiplin Ilmu:", fontSize = 11.sp, color = CurriculumPalette.Muted)
+                        Text("📚 ${info.fieldType}", color = CurriculumPalette.Gold, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                     }
-
                     Column {
-                        Text("Pengarang Kitab:", fontSize = 11.sp, color = Color.Gray)
-                        Text("✍️ ${info.author}", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text("Pengarang Kitab:", fontSize = 11.sp, color = CurriculumPalette.Muted)
+                        Text("✍️ ${info.author}", color = CurriculumPalette.Text, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     }
-
                     Column {
-                        Text("Ringkasan Informasi / Sinopsis:", fontSize = 11.sp, color = Color.Gray)
-                        Text(
-                            text = info.description,
-                            color = Color.LightGray,
-                            fontSize = 12.sp,
-                            lineHeight = 18.sp
-                        )
+                        Text("Ringkasan Informasi / Sinopsis:", fontSize = 11.sp, color = CurriculumPalette.Muted)
+                        Text(text = info.description, color = CurriculumPalette.Text, fontSize = 12.sp, lineHeight = 18.sp)
                     }
-
-                    HorizontalDivider(color = Color(0xFF334155))
-                    Text("Total Pelajaran: ${info.totalCount} Soal/Hadits", color = Color(0xFF38BDF8), fontSize = 12.sp)
+                    HorizontalDivider(color = CurriculumPalette.Sand)
+                    Text("Total Pelajaran: ${info.totalCount} Soal/Hadits", color = CurriculumPalette.Teal, fontSize = 12.sp)
                 }
             },
             confirmButton = {
                 TextButton(onClick = { selectedBookForInfo = null }) {
-                    Text("Tutup", color = Color(0xFF58CC02), fontWeight = FontWeight.Bold)
+                    Text("Tutup", color = CurriculumPalette.Teal, fontWeight = FontWeight.Bold)
                 }
             }
         )
     }
 
-    // --- POP-UP 2: TEMPLATE SERTIFIKAT KELULUSAN ---
     bookToPrintCertificate?.let { certBook ->
         AlertDialog(
             onDismissRequest = { bookToPrintCertificate = null },
-            shape = RoundedCornerShape(20.dp),
-            containerColor = Color(0xFF0F172A),
+            shape = RoundedCornerShape(24.dp),
+            containerColor = CurriculumPalette.Card,
             title = {
-                Text("🎓 Sertifikat Tamat Belajar", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 17.sp)
+                Text("🎓 Sertifikat Tamat Belajar", color = CurriculumPalette.Text, fontWeight = FontWeight.Bold, fontSize = 17.sp)
             },
             text = {
                 Card(
@@ -734,7 +1004,7 @@ fun SelectBookPureDatabaseScreen(
                         )
                         bookToPrintCertificate = null
                     },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF16A34A))
+                    colors = ButtonDefaults.buttonColors(containerColor = CurriculumPalette.Green)
                 ) {
                     Text("Unduh PDF", fontWeight = FontWeight.Bold)
                 }
@@ -748,10 +1018,9 @@ fun SelectBookPureDatabaseScreen(
     }
 }
 
-
-
-
-// 2. DASBOR DENGAN STICKY HEADER & ACCORDION
+// ==========================================
+// 2. DASBOR PADANG PASIR & OASE (DESERT THEME)
+// ==========================================
 @Composable
 fun DashboardScreen(
     user: UserProfile,
@@ -804,100 +1073,305 @@ fun DashboardScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(Color(0xFF131F24))
+                    .background(
+                        Brush.verticalGradient(
+                            colors = listOf(
+                                DesertOasisPalette.HeaderBrownDark,
+                                DesertOasisPalette.HeaderBrownMid
+                            )
+                        )
+                    )
+                    .border(
+                        width = 1.dp,
+                        brush = Brush.horizontalGradient(
+                            listOf(Color.Transparent, DesertOasisPalette.GoldBorder, Color.Transparent)
+                        ),
+                        shape = RectangleShape
+                    )
                     .statusBarsPadding()
-                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Surface(
-                    shape = RoundedCornerShape(12.dp),
-                    color = Color(0xFF202F36),
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFF2D180C).copy(alpha = 0.85f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DesertOasisPalette.GoldBorder.copy(alpha = 0.7f)),
+                    shadowElevation = 2.dp,
                     modifier = Modifier.clickable { onOpenSelectBook() }
                 ) {
-                    Row(modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Text("📖", fontSize = 16.sp)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(user.selectedBookTitle.take(12), color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("📖", fontSize = 15.sp)
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = user.selectedBookTitle.ifBlank { "Pilih Kitab" },
+                            color = Color(0xFFFEF3C7),
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.widthIn(max = 110.dp)
+                        )
                     }
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("🔥", fontSize = 16.sp)
-                    Text(" ${user.currentStreak}", color = Color(0xFFFF9600), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("💎", fontSize = 16.sp)
-                    Text(" ${user.totalXp}", color = Color(0xFF1CB0F6), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("⚡", fontSize = 16.sp)
-                    Text(" ${user.dailyMinutesLearned}m", color = Color(0xFFFF4B4B), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                }
-                var isMutedDashboard by remember { mutableStateOf(SoundManager.isMuted) }
-                IconButton(
-                    onClick = { isMutedDashboard = SoundManager.toggleMute(context) },
-                    modifier = Modifier.size(36.dp)
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(if (isMutedDashboard) "🔇" else "🔊", fontSize = 18.sp)
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.Black.copy(alpha = 0.3f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF9600).copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("🔥", fontSize = 14.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("${user.currentStreak}", color = Color(0xFFFFB74D), fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = Color.Black.copy(alpha = 0.3f),
+                        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF38BDF8).copy(alpha = 0.4f))
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text("💎", fontSize = 14.sp)
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text("${user.totalXp}", color = Color(0xFF7DD3FC), fontWeight = FontWeight.ExtraBold, fontSize = 13.sp)
+                        }
+                    }
+                }
+
+                var isMutedDashboard by remember { mutableStateOf(SoundManager.isMuted) }
+                Surface(
+                    onClick = { isMutedDashboard = SoundManager.toggleMute(context) },
+                    shape = CircleShape,
+                    color = Color(0xFF2D180C).copy(alpha = 0.8f),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, DesertOasisPalette.GoldBorder.copy(alpha = 0.6f)),
+                    modifier = Modifier.size(34.dp)
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(if (isMutedDashboard) "🔇" else "🔊", fontSize = 15.sp)
+                    }
                 }
             }
         },
         bottomBar = {
-            NavigationBar(containerColor = Color(0xFF131F24)) {
-                NavigationBarItem(selected = selectedBottomNavIndex == 0, onClick = { selectedBottomNavIndex = 0 }, icon = { Text("🏠", fontSize = 20.sp) }, label = { Text("Home", fontSize = 10.sp, color = Color.White) })
-                NavigationBarItem(selected = selectedBottomNavIndex == 1, onClick = { selectedBottomNavIndex = 1 }, icon = { Text("🎯", fontSize = 20.sp) }, label = { Text("Target", fontSize = 10.sp, color = Color.White) })
-                NavigationBarItem(selected = selectedBottomNavIndex == 2, onClick = { selectedBottomNavIndex = 2 }, icon = { Text("🏆", fontSize = 20.sp) }, label = { Text("Peringkat", fontSize = 10.sp, color = Color.White) })
-                NavigationBarItem(selected = selectedBottomNavIndex == 3, onClick = { selectedBottomNavIndex = 3 }, icon = { Text("👤", fontSize = 20.sp) }, label = { Text("Profil", fontSize = 10.sp, color = Color.White) })
+            NavigationBar(
+                containerColor = Color(0xFF4A2816),
+                modifier = Modifier.border(
+                    width = 2.dp,
+                    color = DesertOasisPalette.GoldBorder.copy(alpha = 0.8f),
+                    shape = RectangleShape
+                )
+            ) {
+                NavigationBarItem(
+                    selected = selectedBottomNavIndex == 0,
+                    onClick = { selectedBottomNavIndex = 0 },
+                    icon = { Text("🕌", fontSize = 20.sp) },
+                    label = { Text("Home", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selectedBottomNavIndex == 0) Color(0xFFFDE68A) else Color(0xFFD4A373)) }
+                )
+                NavigationBarItem(
+                    selected = selectedBottomNavIndex == 1,
+                    onClick = { selectedBottomNavIndex = 1 },
+                    icon = { Text("🎯", fontSize = 20.sp) },
+                    label = { Text("Target", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selectedBottomNavIndex == 1) Color(0xFFFDE68A) else Color(0xFFD4A373)) }
+                )
+                NavigationBarItem(
+                    selected = selectedBottomNavIndex == 2,
+                    onClick = { selectedBottomNavIndex = 2 },
+                    icon = { Text("🏆", fontSize = 20.sp) },
+                    label = { Text("Peringkat", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selectedBottomNavIndex == 2) Color(0xFFFDE68A) else Color(0xFFD4A373)) }
+                )
+                NavigationBarItem(
+                    selected = selectedBottomNavIndex == 3,
+                    onClick = { selectedBottomNavIndex = 3 },
+                    icon = { Text("👳🏽‍♂️", fontSize = 20.sp) },
+                    label = { Text("Profil", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (selectedBottomNavIndex == 3) Color(0xFFFDE68A) else Color(0xFFD4A373)) }
+                )
             }
         }
     ) { padding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .background(Color(0xFF131F24))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            DesertOasisPalette.SandSkyTop,
+                            DesertOasisPalette.SandDuneLight,
+                            DesertOasisPalette.SandDuneDark
+                        )
+                    )
+                )
                 .padding(padding)
         ) {
             when (selectedBottomNavIndex) {
                 0 -> {
                     Column(modifier = Modifier.fillMaxSize()) {
                         Card(
-                            shape = RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF58CC02)),
-                            modifier = Modifier.fillMaxWidth().clickable { showTableOfContentsDialog = true }
+                            shape = RoundedCornerShape(bottomStart = 24.dp, bottomEnd = 24.dp),
+                            colors = CardDefaults.cardColors(containerColor = DesertOasisPalette.OasisGreenTop),
+                            border = androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF9CE85C)),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable { showTableOfContentsDialog = true }
                         ) {
-                            Row(
-                                modifier = Modifier.padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
+                            Column(
+                                modifier = Modifier
+                                    .background(
+                                        Brush.verticalGradient(
+                                            colors = listOf(
+                                                DesertOasisPalette.OasisGreenTop,
+                                                DesertOasisPalette.OasisGreenBottom
+                                            )
+                                        )
+                                    )
+                                    .padding(14.dp)
                             ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = (activeLesson?.unitTitle ?: "UNIT 1").uppercase(), color = Color(0xFF265700), fontWeight = FontWeight.ExtraBold, fontSize = 11.sp)
-                                    Text(text = "${user.selectedBookTitle}: ${activeLesson?.chapterTitle ?: "Materi Utama"}", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                                    Text("💧 Progres Air: $waterPercent% Terisi ($completedCount/$totalCount Hadits)", color = Color(0xFFE8F5E9), fontSize = 11.sp)
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Surface(
+                                            shape = RoundedCornerShape(6.dp),
+                                            color = Color(0xFFA8F06C).copy(alpha = 0.8f)
+                                        ) {
+                                            Text(
+                                                text = (activeLesson?.unitTitle ?: "UNIT 1").uppercase(),
+                                                color = Color(0xFF1E4803),
+                                                fontWeight = FontWeight.ExtraBold,
+                                                fontSize = 10.sp,
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "${user.selectedBookTitle}: ${activeLesson?.chapterTitle ?: "Materi Utama"}",
+                                            color = Color.White,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            fontSize = 14.sp,
+                                            lineHeight = 18.sp
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Surface(
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = Color(0xFF388E3C),
+                                        border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF8EE04E)),
+                                        shadowElevation = 3.dp,
+                                        modifier = Modifier.size(42.dp)
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) { Text("📋", fontSize = 20.sp) }
+                                    }
                                 }
-                                Surface(shape = RoundedCornerShape(10.dp), color = Color(0xFF46A302), modifier = Modifier.size(42.dp)) {
-                                    Box(contentAlignment = Alignment.Center) { Text("📋", fontSize = 20.sp) }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = DesertOasisPalette.OasisGreenDark.copy(alpha = 0.55f),
+                                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF8BE04B).copy(alpha = 0.5f)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text("💧", fontSize = 12.sp)
+                                                Spacer(modifier = Modifier.width(4.dp))
+                                                Text(
+                                                    text = "Progres Air: $waterPercent% ($completedCount/$totalCount Hadits)",
+                                                    color = Color.White,
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold
+                                                )
+                                            }
+                                            Surface(
+                                                shape = RoundedCornerShape(6.dp),
+                                                color = Color(0xFF0284C7).copy(alpha = 0.4f)
+                                            ) {
+                                                Text(
+                                                    "Oase Aktif",
+                                                    color = Color(0xFFE0F2FE),
+                                                    fontSize = 9.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(5.dp))
+                                        LinearProgressIndicator(
+                                            progress = { waterPercent / 100f },
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(6.dp)
+                                                .clip(RoundedCornerShape(3.dp)),
+                                            color = DesertOasisPalette.WaterBlue,
+                                            trackColor = Color(0xFF1B3F02)
+                                        )
+                                    }
                                 }
                             }
                         }
 
                         if (regularLessons.isEmpty()) {
                             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                Text("Materi kitab ini belum tersedia di database Firestore.", color = Color.Gray, fontSize = 13.sp)
+                                Text(
+                                    "Materi kitab ini belum tersedia di database Firestore.",
+                                    color = DesertOasisPalette.DesertText,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
                             }
                         } else {
-                            LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
                                 allowedUnits.forEachIndexed { unitIdx, unitKey ->
                                     val unitItems = unitsGrouped[unitKey] ?: emptyList()
 
                                     if (unitIdx > 0) {
                                         item {
-                                            Spacer(modifier = Modifier.height(18.dp))
-                                            Surface(shape = RoundedCornerShape(14.dp), color = Color(0xFF1E2E28), modifier = Modifier.padding(horizontal = 20.dp)) {
-                                                Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                                    Text("🌴", fontSize = 24.sp)
+                                            Spacer(modifier = Modifier.height(20.dp))
+                                            Surface(
+                                                shape = RoundedCornerShape(16.dp),
+                                                color = Color(0xFF4A2816).copy(alpha = 0.85f),
+                                                border = androidx.compose.foundation.BorderStroke(1.5.dp, DesertOasisPalette.GoldBorder),
+                                                shadowElevation = 4.dp,
+                                                modifier = Modifier.padding(horizontal = 20.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Text("🌴", fontSize = 22.sp)
                                                     Spacer(modifier = Modifier.width(8.dp))
-                                                    Text("Alhamdulillah! Gerbang Oasis $unitKey", color = Color(0xFF81C784), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                                    Text(
+                                                        "Alhamdulillah! Gerbang Oase $unitKey",
+                                                        color = Color(0xFFFEF3C7),
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.sp
+                                                    )
                                                 }
                                             }
                                             Spacer(modifier = Modifier.height(18.dp))
@@ -912,35 +1386,56 @@ fun DashboardScreen(
                                         val isLocked = !isCompleted && !isFailed && globalIdx > activeLessonIndex
 
                                         val horizontalOffset = when (globalIdx % 4) {
-                                            0 -> (-50).dp
+                                            0 -> (-45).dp
                                             1 -> 0.dp
-                                            2 -> 50.dp
+                                            2 -> 45.dp
                                             else -> 0.dp
                                         }
 
-                                        Column(modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("•", fontSize = 14.sp, color = Color(0xFF37474F))
+                                        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+                                        val pulseScale by infiniteTransition.animateFloat(
+                                            initialValue = 1f,
+                                            targetValue = if (isCurrent) 1.08f else 1f,
+                                            animationSpec = infiniteRepeatable(
+                                                animation = tween(1100, easing = FastOutSlowInEasing),
+                                                repeatMode = RepeatMode.Reverse
+                                            ),
+                                            label = "scale"
+                                        )
 
-                                            Box(modifier = Modifier.offset(x = horizontalOffset).wrapContentSize(), contentAlignment = Alignment.Center) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(vertical = 10.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .offset(x = horizontalOffset)
+                                                    .scale(pulseScale)
+                                                    .wrapContentSize(),
+                                                contentAlignment = Alignment.Center
+                                            ) {
                                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                                     val mainColor = when {
                                                         isCompleted -> Color(0xFF58CC02)
                                                         isFailed -> Color(0xFFFFC800)
-                                                        isCurrent -> Color(0xFF58CC02)
-                                                        else -> Color(0xFF37474F)
+                                                        isCurrent -> Color(0xFFF59E0B)
+                                                        else -> Color(0xFF8C7355)
                                                     }
                                                     val bottomShadowColor = when {
-                                                        isCompleted -> Color(0xFF46A302)
-                                                        isFailed -> Color(0xFFE5B200)
-                                                        isCurrent -> Color(0xFF46A302)
-                                                        else -> Color(0xFF263238)
+                                                        isCompleted -> Color(0xFF388E3C)
+                                                        isFailed -> Color(0xFFC7830F)
+                                                        isCurrent -> Color(0xFFB45309)
+                                                        else -> Color(0xFF5A4632)
                                                     }
 
                                                     Surface(
                                                         shape = CircleShape,
                                                         color = bottomShadowColor,
+                                                        shadowElevation = if (isCurrent) 8.dp else 4.dp,
                                                         modifier = Modifier
-                                                            .size(if (isCurrent) 74.dp else 64.dp)
+                                                            .size(if (isCurrent) 76.dp else 64.dp)
                                                             .clickable {
                                                                 if (isLocked) {
                                                                     showBypassExamDialog = lesson.unitTitle
@@ -952,7 +1447,12 @@ fun DashboardScreen(
                                                             }
                                                     ) {
                                                         Box(
-                                                            modifier = Modifier.padding(bottom = 6.dp).fillMaxSize().clip(CircleShape).background(mainColor),
+                                                            modifier = Modifier
+                                                                .padding(bottom = 6.dp)
+                                                                .fillMaxSize()
+                                                                .clip(CircleShape)
+                                                                .background(mainColor)
+                                                                .border(2.dp, Color.White.copy(alpha = 0.5f), CircleShape),
                                                             contentAlignment = Alignment.Center
                                                         ) {
                                                             Text(
@@ -970,14 +1470,29 @@ fun DashboardScreen(
                                                         }
                                                     }
 
-                                                    Spacer(modifier = Modifier.height(4.dp))
-                                                    Text(lesson.title.ifBlank { "Pos ${globalIdx + 1}" }, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = if (isLocked) Color.Gray else Color.White)
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    Surface(
+                                                        shape = RoundedCornerShape(8.dp),
+                                                        color = Color(0xFFFFF8EB).copy(alpha = 0.9f),
+                                                        border = androidx.compose.foundation.BorderStroke(1.dp, DesertOasisPalette.GoldBorder.copy(alpha = 0.6f)),
+                                                        shadowElevation = 2.dp
+                                                    ) {
+                                                        Text(
+                                                            text = lesson.title.ifBlank { "Pos ${globalIdx + 1}" },
+                                                            fontSize = 11.sp,
+                                                            fontWeight = FontWeight.ExtraBold,
+                                                            color = DesertOasisPalette.DesertText,
+                                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                                            maxLines = 1,
+                                                            overflow = TextOverflow.Ellipsis
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                item { Spacer(modifier = Modifier.height(50.dp)) }
+                                item { Spacer(modifier = Modifier.height(70.dp)) }
                             }
                         }
                     }
@@ -989,14 +1504,14 @@ fun DashboardScreen(
         }
     }
 
-    // POP-UP 1: REDO SOAL
+    // POP-UP REDO SOAL
     lessonToConfirmRedo?.let { lesson ->
         AlertDialog(
             onDismissRequest = { lessonToConfirmRedo = null },
             shape = RoundedCornerShape(22.dp),
-            containerColor = Color(0xFF1E2D33),
+            containerColor = Color(0xFF3B2010),
             title = { Text("🔄 Kerjakan Ulang Soal?", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp) },
-            text = { Text(text = "Soal \"${lesson.title}\" ini sudah pernah kamu selesaikan. Apakah kamu yakin ingin mengerjakannya ulang?", color = Color.LightGray, fontSize = 13.sp) },
+            text = { Text(text = "Soal \"${lesson.title}\" ini sudah pernah kamu selesaikan. Apakah kamu yakin ingin mengerjakannya ulang?", color = Color(0xFFFDE68A), fontSize = 13.sp) },
             confirmButton = {
                 Button(
                     onClick = {
@@ -1008,16 +1523,16 @@ fun DashboardScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) { Text("Ya, Kerjakan Ulang", fontWeight = FontWeight.Bold) }
             },
-            dismissButton = { TextButton(onClick = { lessonToConfirmRedo = null }) { Text("Batal", color = Color.Gray) } }
+            dismissButton = { TextButton(onClick = { lessonToConfirmRedo = null }) { Text("Batal", color = Color.LightGray) } }
         )
     }
 
-    // POP-UP 2: DAFTAR ISI ACCORDION
+    // POP-UP DAFTAR ISI ACCORDION
     if (showTableOfContentsDialog) {
         AlertDialog(
             onDismissRequest = { showTableOfContentsDialog = false },
             shape = RoundedCornerShape(22.dp),
-            containerColor = Color(0xFF1E2D33),
+            containerColor = Color(0xFF3B2010),
             title = { Text("📋 Daftar Isi: ${user.selectedBookTitle}", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp) },
             text = {
                 val chaptersGrouped = remember(regularLessons) { regularLessons.groupBy { it.chapterTitle.ifBlank { "Bab Utama" } } }
@@ -1030,7 +1545,7 @@ fun DashboardScreen(
                         val chapDone = chapterItems.count { user.completedLessons.contains(it.id) }
                         val chapPercent = (chapDone * 100) / chapterItems.size.coerceAtLeast(1)
 
-                        Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = if (isChapterOpen) Color(0xFF16252B) else Color(0xFF131F24)), modifier = Modifier.fillMaxWidth()) {
+                        Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = if (isChapterOpen) Color(0xFF4A2816) else Color(0xFF2D180C)), modifier = Modifier.fillMaxWidth()) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth().clickable {
@@ -1049,7 +1564,7 @@ fun DashboardScreen(
 
                                 if (isChapterOpen) {
                                     Spacer(modifier = Modifier.height(10.dp))
-                                    HorizontalDivider(color = Color(0xFF263A42))
+                                    HorizontalDivider(color = Color(0xFF5A3825))
                                     Spacer(modifier = Modifier.height(8.dp))
 
                                     val subUnits = chapterItems.groupBy { it.unitTitle.ifBlank { "Unit 1" } }
@@ -1057,7 +1572,7 @@ fun DashboardScreen(
                                         val isUnitOpen = expandedUnitKey == unitName
                                         val unitDone = unitLessons.count { user.completedLessons.contains(it.id) }
 
-                                        Card(shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(containerColor = if (isUnitOpen) Color(0xFF20323B) else Color(0xFF1A282E)), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+                                        Card(shape = RoundedCornerShape(10.dp), colors = CardDefaults.cardColors(containerColor = if (isUnitOpen) Color(0xFF5A3118) else Color(0xFF3D2110)), modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
                                             Column(modifier = Modifier.padding(10.dp)) {
                                                 Row(
                                                     modifier = Modifier.fillMaxWidth().clickable { expandedUnitKey = if (isUnitOpen) null else unitName },
@@ -1066,7 +1581,7 @@ fun DashboardScreen(
                                                 ) {
                                                     Column(modifier = Modifier.weight(1f)) {
                                                         Text(unitName, color = Color(0xFFFFD54F), fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                                                        Text("$unitDone/${unitLessons.size} Butir Materi", color = Color.Gray, fontSize = 10.sp)
+                                                        Text("$unitDone/${unitLessons.size} Butir Materi", color = Color.LightGray, fontSize = 10.sp)
                                                     }
                                                     Text(text = if (isUnitOpen) "▲" else "▼", color = if (isUnitOpen) Color(0xFFFFD54F) else Color.LightGray, fontSize = 12.sp)
                                                 }
@@ -1106,19 +1621,19 @@ fun DashboardScreen(
         )
     }
 
-    // POP-UP 3: BYPASS EXAM
+    // POP-UP BYPASS EXAM
     showBypassExamDialog?.let { targetUnit ->
         AlertDialog(
             onDismissRequest = { showBypassExamDialog = null },
             shape = RoundedCornerShape(22.dp),
-            containerColor = Color(0xFF1E2D33),
+            containerColor = Color(0xFF3B2010),
             title = { Text("⚡ Ujian Loncat ke $targetUnit?", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 17.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Ikuti ujian kenaikan untuk langsung menerobos unit ini tanpa mengerjakan bab sebelumnya!", color = Color.LightGray, fontSize = 13.sp)
-                    Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF2A1C20))) {
+                    Text("Ikuti ujian kenaikan untuk langsung menerobos unit ini tanpa mengerjakan bab sebelumnya!", color = Color(0xFFFDE68A), fontSize = 13.sp)
+                    Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF5A2518))) {
                         Column(modifier = Modifier.padding(12.dp)) {
-                            Text("⚠️ KETENTUAN UJIAN KENAIKAN:", color = Color(0xFFFF5252), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("⚠️ KETENTUAN UJIAN KENAIKAN:", color = Color(0xFFFF8A80), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                             Text("• Berisi 3-5 Pertanyaan Ujian Evaluasi", color = Color.White, fontSize = 12.sp)
                             Text("• Dibekali 3 Hati (❤️❤️❤️)", color = Color.White, fontSize = 12.sp)
                         }
@@ -1136,11 +1651,10 @@ fun DashboardScreen(
                     shape = RoundedCornerShape(12.dp)
                 ) { Text("Mulai Ujian 3 Hati 🚀", fontWeight = FontWeight.Bold) }
             },
-            dismissButton = { TextButton(onClick = { showBypassExamDialog = null }) { Text("Nanti Saja", color = Color.Gray) } }
+            dismissButton = { TextButton(onClick = { showBypassExamDialog = null }) { Text("Nanti Saja", color = Color.LightGray) } }
         )
     }
 
-    // POP-UP 4: DIALOG SELEBRASI POP-UP MENYATU DI BAWAH DASHBOARD
     showUnitCelebrationInDashboard?.let { completedUnit ->
         UnitCompletionCelebrationDialog(
             unitTitle = completedUnit,
@@ -1149,14 +1663,14 @@ fun DashboardScreen(
     }
 }
 
-
-
-// Model Tantangan Dinamis dari Firebase
+// ==========================================
+// 3. TARGET TAB
+// ==========================================
 data class ChallengeItem(
     val id: String = "",
     val title: String = "",
     val description: String = "",
-    val targetType: String = "STREAK", // STREAK, XP, MINUTES
+    val targetType: String = "STREAK",
     val targetCount: Int = 10,
     val rewardXp: Int = 50,
     val iconEmoji: String = "🎯"
@@ -1176,7 +1690,7 @@ fun TargetsTab(user: UserProfile) {
                 val list = snap.toObjects(ChallengeItem::class.java)
                 challengesList = if (list.isNotEmpty()) list else listOf(
                     ChallengeItem("1", "Istiqomah 10 Hari Streak", "Belajar hadits berturut-turut", "STREAK", 10, 50, "🔥"),
-                    ChallengeItem("2", "Belajar 10 Menit Harian", "Fokus membaca dan telaah materi", "MINUTES", 10, 25, "⚡")
+                    ChallengeItem("2", "Kumpulkan 100 Poin Hikmah", "Selesaikan materi dan kuis", "XP", 100, 25, "💎")
                 )
                 isLoading = false
             }
@@ -1190,8 +1704,8 @@ fun TargetsTab(user: UserProfile) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("Target & Misi Harian 🎯", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = Color.White)
-        Text("Selesaikan misi dari pengajar untuk raih bonus XP melimpah:", fontSize = 12.sp, color = Color.Gray)
+        Text("Target & Misi Harian 🎯", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = DesertOasisPalette.DesertText)
+        Text("Selesaikan misi untuk mengisi sumur oase ilmu:", fontSize = 12.sp, color = Color(0xFF6B4226))
 
         challengesList.forEach { challenge ->
             val currentProgress = when (challenge.targetType) {
@@ -1206,8 +1720,9 @@ fun TargetsTab(user: UserProfile) {
             Card(
                 shape = RoundedCornerShape(16.dp),
                 colors = CardDefaults.cardColors(
-                    containerColor = if (isDone) Color(0xFF1B3D2F) else Color(0xFF202F36)
+                    containerColor = if (isDone) Color(0xFFE8F5E9) else Color(0xFFFFF8EB)
                 ),
+                border = androidx.compose.foundation.BorderStroke(1.5.dp, DesertOasisPalette.GoldBorder),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column(modifier = Modifier.padding(16.dp)) {
@@ -1219,18 +1734,18 @@ fun TargetsTab(user: UserProfile) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Text(challenge.iconEmoji, fontSize = 20.sp)
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(challenge.title, fontWeight = FontWeight.Bold, color = Color.White, fontSize = 14.sp)
+                            Text(challenge.title, fontWeight = FontWeight.Bold, color = DesertOasisPalette.DesertText, fontSize = 14.sp)
                         }
                         Text(
                             text = "+${challenge.rewardXp} XP ⭐",
-                            color = Color(0xFFFFD54F),
+                            color = Color(0xFFB45309),
                             fontWeight = FontWeight.Bold,
                             fontSize = 12.sp
                         )
                     }
 
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text(challenge.description, color = Color.LightGray, fontSize = 11.sp)
+                    Text(challenge.description, color = Color(0xFF7C4D2B), fontSize = 11.sp)
                     Spacer(modifier = Modifier.height(10.dp))
 
                     Row(
@@ -1242,7 +1757,7 @@ fun TargetsTab(user: UserProfile) {
                             text = if (isDone) "Tuntas! 🎉" else "Progres: $currentProgress / ${challenge.targetCount}",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isDone) Color(0xFF58CC02) else Color(0xFFFF9600)
+                            color = if (isDone) Color(0xFF2E7D32) else Color(0xFFD97706)
                         )
                     }
 
@@ -1250,18 +1765,19 @@ fun TargetsTab(user: UserProfile) {
                     LinearProgressIndicator(
                         progress = { progressPercent },
                         modifier = Modifier.fillMaxWidth().height(8.dp).clip(RoundedCornerShape(4.dp)),
-                        color = if (isDone) Color(0xFF58CC02) else Color(0xFFFF9600),
-                        trackColor = Color(0xFF37474F)
+                        color = if (isDone) Color(0xFF2E7D32) else Color(0xFFD97706),
+                        trackColor = Color(0xFFF3D6B5)
                     )
                 }
             }
         }
-
         Spacer(modifier = Modifier.height(30.dp))
     }
 }
 
-// 3. TAB PERINGKAT SANTRI (REAL-TIME DARI FIRESTORE)
+// ==========================================
+// 4. LEADERBOARD TAB
+// ==========================================
 @Composable
 fun LeaderboardTab(user: UserProfile) {
     val db = remember { com.google.firebase.firestore.FirebaseFirestore.getInstance() }
@@ -1289,27 +1805,35 @@ fun LeaderboardTab(user: UserProfile) {
             .verticalScroll(rememberScrollState()),
         verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text("Papan Peringkat Santri 🏆", fontWeight = FontWeight.ExtraBold, fontSize = 20.sp, color = Color.White)
-        Text("Santri paling istiqomah belajar dari seluruh Nusantara:", fontSize = 12.sp, color = Color.Gray)
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF4A2816)),
+            border = androidx.compose.foundation.BorderStroke(2.dp, DesertOasisPalette.GoldBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text("🏆", fontSize = 32.sp)
+                Text("Liga Kafilah Madinah", fontWeight = FontWeight.ExtraBold, fontSize = 16.sp, color = Color(0xFFFEF3C7))
+                Text("3 Penuntut Ilmu teratas naik ke Liga Makkah!", fontSize = 11.sp, color = Color(0xFFD4A373))
+            }
+        }
 
         if (isLoading) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator(color = Color(0xFF58CC02))
+            Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = Color(0xFFB45309))
             }
         } else if (rankingsList.isEmpty()) {
             Card(
                 shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF202F36)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8EB)),
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
                     text = "Belum ada santri yang terdaftar di database.",
-                    color = Color.LightGray,
+                    color = Color.Gray,
                     fontSize = 13.sp,
                     modifier = Modifier.padding(16.dp)
                 )
@@ -1317,24 +1841,18 @@ fun LeaderboardTab(user: UserProfile) {
         } else {
             rankingsList.forEachIndexed { rank, santri ->
                 val isCurrentUser = santri.accessCode == user.accessCode
-                val cardBorder = if (isCurrentUser) Color(0xFF58CC02) else Color.Transparent
-                val cardBg = when {
-                    isCurrentUser -> Color(0xFF1E382B)
-                    rank == 0 -> Color(0xFF2E7D32)
-                    rank == 1 -> Color(0xFF1C3238)
-                    rank == 2 -> Color(0xFF382B1C)
-                    else -> Color(0xFF202F36)
-                }
+                val cardBorder = if (isCurrentUser) Color(0xFF2E7D32) else DesertOasisPalette.GoldBorder.copy(alpha = 0.5f)
+                val cardBg = if (isCurrentUser) Color(0xFFE8F5E9) else Color(0xFFFFF8EB)
 
                 Card(
                     shape = RoundedCornerShape(14.dp),
                     colors = CardDefaults.cardColors(containerColor = cardBg),
                     modifier = Modifier
                         .fillMaxWidth()
-                        .border(if (isCurrentUser) 2.dp else 0.dp, cardBorder, RoundedCornerShape(14.dp))
+                        .border(if (isCurrentUser) 2.dp else 1.dp, cardBorder, RoundedCornerShape(14.dp))
                 ) {
                     Row(
-                        modifier = Modifier.padding(14.dp),
+                        modifier = Modifier.padding(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
@@ -1342,35 +1860,28 @@ fun LeaderboardTab(user: UserProfile) {
                                 0 -> "🥇"
                                 1 -> "🥈"
                                 2 -> "🥉"
-                                else -> "#${rank + 1}"
+                                else -> "${rank + 1}"
                             },
-                            fontSize = 20.sp,
+                            fontSize = 18.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = DesertOasisPalette.DesertText
                         )
-
                         Spacer(modifier = Modifier.width(12.dp))
-
-                        Text(
-                            text = santri.avatar.ifBlank { "👳‍♂️" },
-                            fontSize = 26.sp
-                        )
-
+                        Text(text = santri.avatar.ifBlank { "👳‍♂️" }, fontSize = 24.sp)
                         Spacer(modifier = Modifier.width(10.dp))
-
                         Column(modifier = Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = santri.name.ifBlank { "Santri Funduq" },
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    fontSize = 14.sp
+                                    color = DesertOasisPalette.DesertText,
+                                    fontSize = 13.sp
                                 )
                                 if (isCurrentUser) {
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
-                                        color = Color(0xFF58CC02)
+                                        color = Color(0xFF2E7D32)
                                     ) {
                                         Text(
                                             text = "Kamu",
@@ -1385,26 +1896,26 @@ fun LeaderboardTab(user: UserProfile) {
                             Text(
                                 text = "Kota: ${santri.city.ifBlank { "Indonesia" }} • 🔥 ${santri.currentStreak} Hari",
                                 fontSize = 11.sp,
-                                color = Color.LightGray
+                                color = Color(0xFF7C4D2B)
                             )
                         }
-
                         Text(
-                            text = "⭐ ${santri.totalXp} XP",
+                            text = "💧 ${santri.totalXp}",
                             fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFFFFD54F),
+                            color = Color(0xFF0284C7),
                             fontSize = 13.sp
                         )
                     }
                 }
             }
         }
-
         Spacer(modifier = Modifier.height(30.dp))
     }
 }
 
-// 4. TAB PROFIL
+// ==========================================
+// 5. PROFIL TAB
+// ==========================================
 @Composable
 fun ProfileTab(
     user: UserProfile,
@@ -1416,7 +1927,10 @@ fun ProfileTab(
     val avatarOptions = listOf("👳‍♂️", "🧕", "🎓", "📚", "🕌", "🐪", "⭐", "🌿", "🦁", "📖")
 
     Column(
-        modifier = Modifier.fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp)
+            .verticalScroll(rememberScrollState()),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -1425,10 +1939,12 @@ fun ProfileTab(
         Box(contentAlignment = Alignment.BottomEnd) {
             Surface(
                 shape = CircleShape,
-                color = Color(0xFF2E7D32),
+                color = Color(0xFFFDE68A),
+                border = androidx.compose.foundation.BorderStroke(3.dp, DesertOasisPalette.HeaderBrownDark),
+                shadowElevation = 4.dp,
                 modifier = Modifier.size(90.dp).clickable { showAvatarPicker = true }
             ) {
-                Box(contentAlignment = Alignment.Center) { Text(user.avatar.ifBlank { "👳‍♂️" }, fontSize = 48.sp) }
+                Box(contentAlignment = Alignment.Center) { Text(user.avatar.ifBlank { "👳‍♂️" }, fontSize = 46.sp) }
             }
             Surface(
                 shape = CircleShape,
@@ -1439,22 +1955,70 @@ fun ProfileTab(
             }
         }
 
-        Text(text = "Klik foto untuk ganti avatar 📷", fontSize = 11.sp, color = Color(0xFF81C784), modifier = Modifier.clickable { showAvatarPicker = true })
-        Text(user.name, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
-        Text("Kota: ${user.city} • Tingkat: ${user.selectedLevelId}", fontSize = 13.sp, color = Color.LightGray)
+        Text(text = "Klik foto untuk ganti avatar 📷", fontSize = 11.sp, color = DesertOasisPalette.DesertText, modifier = Modifier.clickable { showAvatarPicker = true })
+        Text(user.name, fontSize = 22.sp, fontWeight = FontWeight.ExtraBold, color = DesertOasisPalette.DesertText)
+        Text("Kota: ${user.city} • Tingkat: ${user.selectedLevelId}", fontSize = 13.sp, color = Color(0xFF6B4226))
 
-        Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = Color(0xFF202F36)), modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8EB)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DesertOasisPalette.GoldBorder),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("🔥", fontSize = 20.sp)
+                    Text("${user.currentStreak} Hari", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = DesertOasisPalette.DesertText)
+                    Text("Streak", fontSize = 10.sp, color = Color.Gray)
+                }
+            }
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8EB)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DesertOasisPalette.GoldBorder),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("💧", fontSize = 20.sp)
+                    Text("${user.completedLessons.size}", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = DesertOasisPalette.DesertText)
+                    Text("Hadits", fontSize = 10.sp, color = Color.Gray)
+                }
+            }
+            Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8EB)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, DesertOasisPalette.GoldBorder),
+                modifier = Modifier.weight(1f)
+            ) {
+                Column(modifier = Modifier.padding(12.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("💎", fontSize = 20.sp)
+                    Text("${user.totalXp}", fontWeight = FontWeight.ExtraBold, fontSize = 13.sp, color = DesertOasisPalette.DesertText)
+                    Text("Permata XP", fontSize = 10.sp, color = Color.Gray)
+                }
+            }
+        }
+
+        Card(
+            shape = RoundedCornerShape(16.dp),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF8EB)),
+            border = androidx.compose.foundation.BorderStroke(1.5.dp, DesertOasisPalette.GoldBorder),
+            modifier = Modifier.fillMaxWidth()
+        ) {
             Column(modifier = Modifier.padding(16.dp)) {
-                Text("KODE AKSES LOGIN PRIBADI:", fontSize = 11.sp, color = Color.Gray, fontWeight = FontWeight.SemiBold)
-                Text(user.accessCode, fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color(0xFF58CC02))
+                Text("KODE AKSES LOGIN PRIBADI:", fontSize = 11.sp, color = Color(0xFF7C4D2B), fontWeight = FontWeight.SemiBold)
+                Text(user.accessCode, fontSize = 24.sp, fontWeight = FontWeight.Black, color = Color(0xFF2E7D32))
                 Spacer(modifier = Modifier.height(4.dp))
-                Text("Gunakan kode ini jika ingin berpindah ke perangkat HP lain.", fontSize = 11.sp, color = Color.LightGray)
+                Text("Gunakan kode ini jika ingin berpindah ke perangkat HP lain.", fontSize = 11.sp, color = Color(0xFF5A3825))
             }
         }
 
         Card(
             shape = RoundedCornerShape(16.dp),
             colors = CardDefaults.cardColors(containerColor = Color(0xFFE8F5E9)),
+            border = androidx.compose.foundation.BorderStroke(1.5.dp, Color(0xFF81C784)),
             modifier = Modifier
                 .fillMaxWidth()
                 .clickable {
@@ -1476,7 +2040,12 @@ fun ProfileTab(
             }
         }
 
-        Button(onClick = onLogout, colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)), shape = RoundedCornerShape(14.dp), modifier = Modifier.fillMaxWidth().height(48.dp)) {
+        Button(
+            onClick = onLogout,
+            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFC62828)),
+            shape = RoundedCornerShape(14.dp),
+            modifier = Modifier.fillMaxWidth().height(48.dp)
+        ) {
             Text("Keluar dari Akun (Logout)", fontWeight = FontWeight.Bold)
         }
     }
@@ -1485,16 +2054,16 @@ fun ProfileTab(
         AlertDialog(
             onDismissRequest = { showAvatarPicker = false },
             shape = RoundedCornerShape(22.dp),
-            containerColor = Color(0xFF1E2D33),
+            containerColor = Color(0xFF3B2010),
             title = { Text("Pilih Karakter Santri 👳‍♂️", color = Color.White, fontWeight = FontWeight.ExtraBold, fontSize = 18.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("Pilih avatar yang mencerminkan semangat belajarmu:", color = Color.LightGray, fontSize = 13.sp)
+                    Text("Pilih avatar yang mencerminkan semangat belajarmu:", color = Color(0xFFFDE68A), fontSize = 13.sp)
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
                         avatarOptions.take(5).forEach { emoji ->
                             Surface(
                                 shape = CircleShape,
-                                color = if (user.avatar == emoji) Color(0xFF58CC02) else Color(0xFF131F24),
+                                color = if (user.avatar == emoji) Color(0xFF58CC02) else Color(0xFF2D180C),
                                 modifier = Modifier.size(48.dp).clickable {
                                     onUpdateAvatar(emoji)
                                     showAvatarPicker = false
@@ -1508,7 +2077,7 @@ fun ProfileTab(
                         avatarOptions.drop(5).take(5).forEach { emoji ->
                             Surface(
                                 shape = CircleShape,
-                                color = if (user.avatar == emoji) Color(0xFF58CC02) else Color(0xFF131F24),
+                                color = if (user.avatar == emoji) Color(0xFF58CC02) else Color(0xFF2D180C),
                                 modifier = Modifier.size(48.dp).clickable {
                                     onUpdateAvatar(emoji)
                                     showAvatarPicker = false
@@ -1526,7 +2095,7 @@ fun ProfileTab(
 }
 
 // ==========================================
-// DIALOG SELEBRASI KELULUSAN UNIT MEGAH 🎉
+// 6. POP-UP SELEBRASI KHATAM UNIT
 // ==========================================
 @Composable
 fun UnitCompletionCelebrationDialog(
@@ -1536,7 +2105,7 @@ fun UnitCompletionCelebrationDialog(
     AlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(22.dp),
-        containerColor = Color(0xFF0F172A),
+        containerColor = Color(0xFF3B2010),
         title = {
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -1556,7 +2125,7 @@ fun UnitCompletionCelebrationDialog(
                 Text("🌴", fontSize = 48.sp)
                 Text(
                     text = "Selamat! Kamu telah menuntaskan seluruh butir materi latihan dan ujian pada:\n\n\"$unitTitle\"",
-                    color = Color.LightGray,
+                    color = Color(0xFFFDE68A),
                     fontSize = 13.sp,
                     textAlign = TextAlign.Center,
                     lineHeight = 18.sp
@@ -1564,13 +2133,13 @@ fun UnitCompletionCelebrationDialog(
                 Spacer(modifier = Modifier.height(6.dp))
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = Color(0xFF1E382B)
+                    color = Color(0xFF2E6F1E)
                 ) {
                     Text(
                         text = "🎁 Bonus Khatam: +50 XP & Progres Air Terisi! 💧",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color(0xFF69F0AE),
+                        color = Color(0xFFA8F06C),
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -1588,4 +2157,3 @@ fun UnitCompletionCelebrationDialog(
         }
     )
 }
-

@@ -4,6 +4,7 @@ data class UserProfile(
     val accessCode: String = "",
     val name: String = "",
     val city: String = "",
+    val province: String = "",
     val phoneNumber: String = "",
     val deviceId: String = "",
     val avatar: String = "👳‍♂️", // Tambahan kolom avatar karakter santri
@@ -12,6 +13,8 @@ data class UserProfile(
     val totalXp: Int = 0,
     val level: Int = 1,
     val currentStreak: Int = 0,
+    val lastActivityAt: Long = 0L,
+    val lastActivityMessage: String = "",
     val dailyMinutesLearned: Int = 10,
     val lastStudyDate: String = "",
     val completedSectionIds: List<String> = emptyList(),
@@ -85,11 +88,11 @@ data class BookItem(
     val chapters: List<Chapter> = emptyList()
 )
 
-// Model Data Top Santri untuk Halaman Depan
-data class TopSantri(
+data class SantriActivity(
+    val id: String = "",
     val name: String = "",
-    val totalXp: Int = 0,
-    val completedBooksCount: Int = 0
+    val message: String = "",
+    val lastActivityAt: Long = 0L
 )
 
 data class BookOption(
@@ -136,4 +139,3 @@ data class BookProgressInfo(
     val isNew: Boolean
         get() = completedCount == 0
 }
-
